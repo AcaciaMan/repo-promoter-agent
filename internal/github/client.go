@@ -192,5 +192,6 @@ func parseGitHubURL(rawURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("invalid GitHub URL: %q (expected github.com/owner/repo)", rawURL)
 	}
 
-	return parts[0], parts[1], nil
+	repo = strings.TrimSuffix(parts[1], ".git")
+	return parts[0], repo, nil
 }

@@ -11,6 +11,7 @@ import (
 	"repo-promoter-agent/internal/github"
 	"repo-promoter-agent/internal/handler"
 	"repo-promoter-agent/internal/store"
+	"repo-promoter-agent/static"
 )
 
 func main() {
@@ -48,7 +49,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient, githubClient, st))
 	mux.Handle("/api/search", handler.NewSearchHandler(st))
-	mux.Handle("/", http.FileServer(http.Dir("static")))
+	mux.Handle("/", noCacheHandler(http.FileServerFS(static.Files)))
 
 	addr := ":" + port
 	log.Printf("Server listening on http://localhost%s", addr)
@@ -63,4 +64,12 @@ func mustEnv(key string) string {
 		log.Fatalf("required environment variable %s is not set", key)
 	}
 	return v
+}
+
+// noCacheHandler wraps a handler to set Cache-Control: no-cache for development.
+func noCacheHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
 }
