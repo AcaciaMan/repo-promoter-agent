@@ -101,8 +101,9 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Save inserts a new promotion into the database. On success it sets p.ID and
-// p.CreatedAt from the inserted row.
+// Save inserts a new promotion into the database. If a promotion for the same
+// repo_url already exists, the old record is deleted first. On success it sets
+// p.ID and p.CreatedAt from the inserted row.
 func (s *Store) Save(ctx context.Context, p *Promotion) error {
 	benefits, err := marshalJSON(p.KeyBenefits)
 	if err != nil {
@@ -115,6 +116,12 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 	tweets, err := marshalJSON(p.TwitterPosts)
 	if err != nil {
 		return fmt.Errorf("marshal twitter_posts: %w", err)
+	}
+
+	// Delete any existing promotion for the same repo URL.
+	const delQ = `DELETE FROM promotions WHERE repo_url = ?`
+	if _, err := s.db.ExecContext(ctx, delQ, p.RepoURL); err != nil {
+		return fmt.Errorf("delete old promotion: %w", err)
 	}
 
 	const q = `INSERT INTO promotions

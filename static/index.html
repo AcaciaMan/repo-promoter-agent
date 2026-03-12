@@ -89,7 +89,7 @@
 /* ---- helpers ---- */
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function copyText(text,btn){navigator.clipboard.writeText(text).then(()=>{btn.textContent='Copied!';setTimeout(()=>{btn.textContent='Copy'},1500)})}
-function cpBtnHtml(){return '<button class="btn-sm" aria-label="Copy to clipboard" onclick="event.stopPropagation();copyText(this.closest(\'.tweet,.linkedin-block\').querySelector?copyText(this.closest(\'.tweet\')?.querySelector(\'span\')?.textContent||this.closest(\'.li-copy-wrap\')?.previousElementSibling?.textContent||\'\',this):void 0">Copy</button>'}
+function safeHref(url){try{const u=new URL(url);return(u.protocol==='https:'||u.protocol==='http:')?url:'#'}catch{return '#'}}
 function tweetCopyBtn(){return '<button class="btn-sm" aria-label="Copy tweet" onclick="event.stopPropagation();copyText(this.previousElementSibling.textContent,this)">Copy</button>'}
 function liCopyBtn(){return '<div class="li-copy-wrap"><button class="btn-sm" aria-label="Copy LinkedIn post" onclick="event.stopPropagation();copyText(this.parentElement.previousElementSibling.textContent,this)">Copy</button></div>'}
 function fmtDate(s){if(!s)return '';const d=new Date(s.includes('T')?s:s.replace(' ','T')+'Z');return isNaN(d.getTime())?s:d.toLocaleDateString()}
