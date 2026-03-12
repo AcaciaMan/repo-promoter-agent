@@ -4,19 +4,28 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"repo-promoter-agent/internal/agent"
+	"repo-promoter-agent/internal/github"
+	"repo-promoter-agent/internal/store"
 )
 
 // GenerateHandler handles POST /api/generate requests.
 type GenerateHandler struct {
-	agentClient *agent.Client
+	agentClient  *agent.Client
+	githubClient *github.Client
+	store        *store.Store
 }
 
-// NewGenerateHandler creates a GenerateHandler with the given agent client.
-func NewGenerateHandler(agentClient *agent.Client) *GenerateHandler {
-	return &GenerateHandler{agentClient: agentClient}
+// NewGenerateHandler creates a GenerateHandler with all dependencies.
+func NewGenerateHandler(agentClient *agent.Client, githubClient *github.Client, st *store.Store) *GenerateHandler {
+	return &GenerateHandler{
+		agentClient:  agentClient,
+		githubClient: githubClient,
+		store:        st,
+	}
 }
 
 type generateRequest struct {
@@ -33,22 +42,33 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("POST /api/generate from %s", r.RemoteAddr)
 
-	// Parse request body. Use hardcoded defaults if body is missing or invalid.
-	input := defaultRepoInput()
+	// Parse request body.
 	var req generateRequest
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			if req.RepoURL != "" {
-				input.RepoURL = req.RepoURL
-			}
-			if req.TargetChannel != "" {
-				input.TargetChannel = req.TargetChannel
-			}
-			if req.TargetAudience != "" {
-				input.TargetAudience = req.TargetAudience
-			}
-		}
+		json.NewDecoder(r.Body).Decode(&req)
 	}
+
+	// Normalise target_channel.
+	req.TargetChannel = normalizeChannel(req.TargetChannel)
+
+	// Build agent input: real GitHub data or hardcoded fallback.
+	var input agent.RepoInput
+	repoURL := strings.TrimSpace(req.RepoURL)
+
+	if repoURL != "" {
+		fetched, err := h.githubClient.FetchRepo(r.Context(), repoURL)
+		if err != nil {
+			log.Printf("GitHub fetch failed for %q: %v", repoURL, err)
+			writeError(w, http.StatusUnprocessableEntity, "failed to fetch repo: "+err.Error())
+			return
+		}
+		input = fetched
+	} else {
+		input = defaultRepoInput()
+	}
+
+	input.TargetChannel = req.TargetChannel
+	input.TargetAudience = req.TargetAudience
 
 	// Call the agent.
 	start := time.Now()
@@ -60,11 +80,39 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "agent request failed: "+err.Error())
 		return
 	}
-
 	log.Printf("Agent call succeeded in %s (%d bytes)", elapsed, len(result))
 
+	// Parse agent output into a Promotion.
+	var promo store.Promotion
+	if err := json.Unmarshal(result, &promo); err != nil {
+		log.Printf("Failed to parse agent output: %v", err)
+		// Return raw result as a fallback so content isn't lost.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(result)
+		return
+	}
+	promo.TargetChannel = req.TargetChannel
+	promo.TargetAudience = req.TargetAudience
+
+	// Store (best-effort — never fail the request because of a DB error).
+	if err := h.store.Save(r.Context(), &promo); err != nil {
+		log.Printf("WARNING: failed to save promotion: %v", err)
+	}
+
+	// Return the stored promotion (with id + created_at).
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(result)
+	json.NewEncoder(w).Encode(promo)
+}
+
+func normalizeChannel(ch string) string {
+	switch strings.ToLower(strings.TrimSpace(ch)) {
+	case "twitter":
+		return "twitter"
+	case "linkedin":
+		return "linkedin"
+	default:
+		return "general"
+	}
 }
 
 func defaultRepoInput() agent.RepoInput {

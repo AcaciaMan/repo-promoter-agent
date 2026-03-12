@@ -8,7 +8,9 @@ import (
 	"github.com/joho/godotenv"
 
 	"repo-promoter-agent/internal/agent"
+	"repo-promoter-agent/internal/github"
 	"repo-promoter-agent/internal/handler"
+	"repo-promoter-agent/internal/store"
 )
 
 func main() {
@@ -26,13 +28,26 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "promotions.db"
+	}
 
-	// Create agent client.
+	// Create store.
+	st, err := store.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer st.Close()
+
+	// Create clients.
 	agentClient := agent.NewClient(endpoint, accessKey)
+	githubClient := github.NewClient()
 
 	// Set up routes.
 	mux := http.NewServeMux()
-	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient))
+	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient, githubClient, st))
+	mux.Handle("/api/search", handler.NewSearchHandler(st))
 	mux.Handle("/", http.FileServer(http.Dir("static")))
 
 	addr := ":" + port
