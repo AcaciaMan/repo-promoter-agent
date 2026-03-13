@@ -171,6 +171,7 @@ genBtn.onclick=async()=>{
         const url=document.getElementById('repo-url').value.trim();
         if(url)body.repo_url=url;
         const res=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if(res.status===429){const e=await res.json().catch(()=>({}));const secs=e.retry_after_seconds||60;throw new Error('Rate limit reached. Please wait '+secs+' seconds before trying again.')}
         if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||res.statusText)}
         const d=await res.json();
         genResult.innerHTML=renderFull(d);
@@ -269,6 +270,7 @@ async function doSearch(){
     try{
         const url='/api/search'+(q?'?q='+encodeURIComponent(q):'');
         const res=await fetch(url);
+        if(res.status===429){const e=await res.json().catch(()=>({}));const secs=e.retry_after_seconds||60;throw new Error('Search rate limit reached. Please wait '+secs+' seconds.')}
         if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||res.statusText)}
         const d=await res.json();
         if(!d.results||d.results.length===0){searchResults.innerHTML='<p style="color:#888">No results found.</p>';return}

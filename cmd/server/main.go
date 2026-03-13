@@ -2,14 +2,18 @@ package main
 
 import (
 	"log"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 
 	"repo-promoter-agent/internal/agent"
 	"repo-promoter-agent/internal/github"
 	"repo-promoter-agent/internal/handler"
+	"repo-promoter-agent/internal/ratelimit"
 	"repo-promoter-agent/internal/store"
 	"repo-promoter-agent/static"
 )
@@ -63,10 +67,22 @@ func main() {
 		log.Println("Analysis Agent not configured — repo analysis feature disabled (set ANALYSIS_AGENT_ENDPOINT and ANALYSIS_AGENT_ACCESS_KEY to enable)")
 	}
 
+	// Create rate limiter.
+	generateMax := envIntOr("RATE_LIMIT_GENERATE_MAX", 5)
+	searchMax := envIntOr("RATE_LIMIT_SEARCH_MAX", 100)
+
+	limiter := ratelimit.NewLimiter(map[string]ratelimit.BucketConfig{
+		"generate": {Max: generateMax, Window: 5 * time.Minute},
+		"search":   {Max: searchMax, Window: 5 * time.Minute},
+	})
+	stopCleanup := limiter.StartCleanup(10 * time.Minute)
+	defer stopCleanup()
+	log.Printf("Rate limiter enabled: generate=%d/5m0s, search=%d/5m0s", generateMax, searchMax)
+
 	// Set up routes.
 	mux := http.NewServeMux()
-	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient, githubClient, st, analysisClient))
-	mux.Handle("/api/search", handler.NewSearchHandler(st))
+	mux.Handle("/api/generate", limiter.Middleware("generate")(handler.NewGenerateHandler(agentClient, githubClient, st, analysisClient)))
+	mux.Handle("/api/search", limiter.Middleware("search")(handler.NewSearchHandler(st)))
 	mux.Handle("/", noCacheHandler(http.FileServerFS(static.Files)))
 
 	addr := ":" + port
@@ -82,6 +98,26 @@ func mustEnv(key string) string {
 		log.Fatalf("required environment variable %s is not set", key)
 	}
 	return v
+}
+
+// envIntOr reads an integer from the named env var, or returns the default.
+// Logs a warning if the value is set but not a valid integer.
+// A value of 0 is treated as "disable" and returns math.MaxInt32.
+func envIntOr(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		log.Printf("WARNING: %s=%q is not a valid integer, using default %d", key, v, defaultVal)
+		return defaultVal
+	}
+	if n == 0 {
+		log.Printf("%s=0 — rate limiting disabled for this bucket", key)
+		return math.MaxInt32
+	}
+	return n
 }
 
 // noCacheHandler wraps a handler to set Cache-Control: no-cache for development.

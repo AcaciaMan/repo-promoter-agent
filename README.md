@@ -93,6 +93,8 @@ internal/handler/search.go  — GET /api/search handler
 internal/store/store.go     — SQLite storage with FTS5 full-text search
 static/index.html           — Single-page frontend UI
 static/embed.go             — go:embed for static assets
+internal/ratelimit/ratelimit.go  — In-memory per-client rate limiter
+internal/ratelimit/clientkey.go  — Client IP extraction (X-Forwarded-For aware)
 ```
 
 ## Getting Started
@@ -113,6 +115,8 @@ static/embed.go             — go:embed for static assets
 | `GITHUB_TOKEN`     | No       | —                | GitHub PAT for traffic metrics (views/clones) on AcaciaMan repos         |
 | `ANALYSIS_AGENT_ENDPOINT` | No | —             | URL of the Analysis Agent service (enables repo analysis) |
 | `ANALYSIS_AGENT_ACCESS_KEY` | No | —            | API key for the Analysis Agent                            |
+| `RATE_LIMIT_GENERATE_MAX` | No | `5`            | Max generate requests per client per 5-min window         |
+| `RATE_LIMIT_SEARCH_MAX`   | No | `100`          | Max search requests per client per 5-min window           |
 
 ### Run
 
@@ -201,6 +205,21 @@ ANALYSIS_AGENT_ACCESS_KEY=your-analysis-access-key-here
 | Both env vars set + agent responds    | Analysis generated, stored, displayed, fed to Promotion Agent |
 | Both env vars set + agent fails       | Warning logged, promotion proceeds without analysis |
 | Env vars not set                      | Feature disabled — no analysis call, no UI panel |
+
+## Rate Limiting
+
+The server rate-limits API requests per client IP using an in-memory rolling-window limiter.
+
+| Endpoint | Default Limit | Window | Override Env Var |
+|----------|--------------|--------|------------------|
+| `POST /api/generate` | 5 requests | 5 minutes | `RATE_LIMIT_GENERATE_MAX` |
+| `GET /api/search` | 100 requests | 5 minutes | `RATE_LIMIT_SEARCH_MAX` |
+
+When a client exceeds the limit, the server responds with HTTP 429 and:
+- A `Retry-After` header (seconds until the client can retry).
+- A JSON body: `{"error": "rate limit exceeded", "retry_after_seconds": 42}`.
+
+Behind a reverse proxy (like DigitalOcean App Platform), the limiter uses the `X-Forwarded-For` header for client identification.
 
 ## Tech Stack
 
