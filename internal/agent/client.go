@@ -117,7 +117,7 @@ func NewClient(endpoint, accessKey string) *Client {
 		endpoint:  endpoint,
 		accessKey: accessKey,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 5 * time.Minute,
 		},
 	}
 }

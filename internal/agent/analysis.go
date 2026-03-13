@@ -104,13 +104,13 @@ type AnalysisClient struct {
 	httpClient *http.Client
 }
 
-// NewAnalysisClient creates an AnalysisClient with a 30-second timeout.
+// NewAnalysisClient creates an AnalysisClient with a 5-minute timeout.
 func NewAnalysisClient(endpoint, accessKey string) *AnalysisClient {
 	return &AnalysisClient{
 		endpoint:  endpoint,
 		accessKey: accessKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 5 * time.Minute,
 		},
 	}
 }
