@@ -178,7 +178,7 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 		return fmt.Errorf("insert promotion: %w", err)
 	}
 
-	p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	p.CreatedAt = parseTime(createdAt)
 	return nil
 }
 
@@ -259,7 +259,7 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 		p.KeyBenefits = unmarshalJSONOrEmpty(benefits)
 		p.Tags = unmarshalJSONOrEmpty(tags)
 		p.TwitterPosts = unmarshalJSONOrEmpty(tweets)
-		p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		p.CreatedAt = parseTime(createdAt)
 		if analysisJSON.Valid {
 			p.AnalysisJSON = json.RawMessage(analysisJSON.String)
 		}
@@ -272,6 +272,19 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 		result = []Promotion{}
 	}
 	return result, nil
+}
+
+func parseTime(s string) time.Time {
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func marshalJSON(v []string) (string, error) {

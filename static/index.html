@@ -9,10 +9,17 @@
         body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#222}
         h1{margin-bottom:.25rem}
         .desc{color:#666;margin-top:0}
-        section{border:1px solid #ddd;border-radius:8px;padding:1.25rem;margin-bottom:2rem}
-        section h2{margin-top:0}
-        .gen-section{border-left:4px solid #0969da}
-        .search-section{border-left:4px solid #2da44e}
+        .tabs{display:flex;border-bottom:2px solid #ddd;margin-bottom:0}
+        .tab{padding:.6rem 1.5rem;font-size:1rem;font-weight:600;cursor:pointer;border:none;background:none;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .2s,border-color .2s}
+        .tab:hover{color:#333}
+        .tab.active{color:#0969da;border-bottom-color:#0969da}
+        .tab.active.tab-search{color:#2da44e;border-bottom-color:#2da44e}
+        .tab-content{display:none;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;padding:1.25rem}
+        .tab-content.active{display:block}
+        section{border:none;border-radius:0;padding:0;margin-bottom:0}
+        section h2{display:none}
+        .gen-section{border-left:none}
+        .search-section{border-left:none}
         label{display:block;font-weight:600;margin:.6rem 0 .25rem}
         input[type=text],select{width:100%;padding:.5rem;font-size:.95rem;border:1px solid #ccc;border-radius:4px}
         .row{display:flex;gap:.75rem;flex-wrap:wrap}
@@ -67,7 +74,14 @@
 <h1>Repo Promoter Agent</h1>
 <p class="desc">Generate promotional content for any public GitHub repo, then search your history.</p>
 
+<!-- ===== TABS ===== -->
+<div class="tabs">
+    <button class="tab active" onclick="switchTab('generate')" id="tab-generate">Generate</button>
+    <button class="tab tab-search" onclick="switchTab('search')" id="tab-search">Search &amp; Browse</button>
+</div>
+
 <!-- ===== GENERATE ===== -->
+<div class="tab-content active" id="panel-generate">
 <section class="gen-section">
     <h2>Generate</h2>
     <label for="repo-url">GitHub Repo URL</label>
@@ -89,8 +103,10 @@
     <div id="gen-error" class="error"></div>
     <div id="gen-result" class="hidden"></div>
 </section>
+</div>
 
 <!-- ===== SEARCH ===== -->
+<div class="tab-content" id="panel-search">
 <section class="search-section">
     <h2>Search &amp; Browse</h2>
     <div style="display:flex;gap:.5rem">
@@ -101,8 +117,17 @@
     <div id="search-error" class="error"></div>
     <div id="search-results"></div>
 </section>
+</div>
 
 <script>
+/* ---- tab switching ---- */
+function switchTab(name){
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(p=>p.classList.remove('active'));
+    document.getElementById('tab-'+name).classList.add('active');
+    document.getElementById('panel-'+name).classList.add('active');
+}
+
 /* ---- helpers ---- */
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function copyText(text,btn){navigator.clipboard.writeText(text).then(()=>{btn.textContent='Copied!';setTimeout(()=>{btn.textContent='Copy'},1500)})}
