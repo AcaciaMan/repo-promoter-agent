@@ -111,6 +111,8 @@ static/embed.go             — go:embed for static assets
 | `PORT`             | No       | `8080`           | HTTP server port                   |
 | `DB_PATH`          | No       | `promotions.db`  | SQLite database file path          |
 | `GITHUB_TOKEN`     | No       | —                | GitHub PAT for traffic metrics (views/clones) on AcaciaMan repos         |
+| `ANALYSIS_AGENT_ENDPOINT` | No | —             | URL of the Analysis Agent service (enables repo analysis) |
+| `ANALYSIS_AGENT_ACCESS_KEY` | No | —            | API key for the Analysis Agent                            |
 
 ### Run
 
@@ -167,6 +169,38 @@ GITHUB_TOKEN=ghp_your_token_here
 - GitHub only provides traffic data for the **last 14 days**.
 - Traffic endpoints require **push access** to the repository — the token must belong to the repo owner or a collaborator.
 - Traffic metrics are fetched per-generation, not cached. Rapid re-generation of the same repo will make multiple API calls.
+
+## Repo Analysis (Optional)
+
+The app can optionally call a second AI agent — the **Analysis Agent** — to produce a structured marketing analysis of each repository before generating promotional content. The analysis includes:
+
+- **Primary value proposition** — what the repo helps users achieve.
+- **Ideal audience** — who would benefit most.
+- **Key features** — user-facing benefits.
+- **Differentiators** — what makes it stand out.
+- **Risks/limitations** — caveats like early-stage status or narrow scope.
+- **Social proof signals** — interpretation of stars and traffic metrics.
+- **Positioning angles** — suggested marketing angles.
+
+When configured, this analysis is displayed in a "Why this repo?" panel on the Generate view and as compact summaries on Search result cards. It also feeds into the Promotion Agent to sharpen headlines, summaries, and CTAs.
+
+### Setup
+
+1. Create an Analysis Agent on the [DigitalOcean Gradient dashboard](https://cloud.digitalocean.com/gen-ai/agents) using the instructions in `docs/analysis-agent-model-instructions.md`.
+2. Set the environment variables:
+
+```bash
+ANALYSIS_AGENT_ENDPOINT=https://your-analysis-agent-id.agents.do-ai.run
+ANALYSIS_AGENT_ACCESS_KEY=your-analysis-access-key-here
+```
+
+### Behavior by scenario
+
+| Scenario                              | Analysis behavior                              |
+|---------------------------------------|------------------------------------------------|
+| Both env vars set + agent responds    | Analysis generated, stored, displayed, fed to Promotion Agent |
+| Both env vars set + agent fails       | Warning logged, promotion proceeds without analysis |
+| Env vars not set                      | Feature disabled — no analysis call, no UI panel |
 
 ## Tech Stack
 

@@ -52,9 +52,20 @@ func main() {
 	}
 	githubClient := github.NewClient(ghToken)
 
+	// Analysis Agent (optional — enables repo analysis feature).
+	analysisEndpoint := os.Getenv("ANALYSIS_AGENT_ENDPOINT")
+	analysisKey := os.Getenv("ANALYSIS_AGENT_ACCESS_KEY")
+	var analysisClient *agent.AnalysisClient
+	if analysisEndpoint != "" && analysisKey != "" {
+		analysisClient = agent.NewAnalysisClient(analysisEndpoint, analysisKey)
+		log.Println("Analysis Agent configured — repo analysis feature enabled")
+	} else {
+		log.Println("Analysis Agent not configured — repo analysis feature disabled (set ANALYSIS_AGENT_ENDPOINT and ANALYSIS_AGENT_ACCESS_KEY to enable)")
+	}
+
 	// Set up routes.
 	mux := http.NewServeMux()
-	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient, githubClient, st))
+	mux.Handle("/api/generate", handler.NewGenerateHandler(agentClient, githubClient, st, analysisClient))
 	mux.Handle("/api/search", handler.NewSearchHandler(st))
 	mux.Handle("/", noCacheHandler(http.FileServerFS(static.Files)))
 

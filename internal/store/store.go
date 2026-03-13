@@ -60,23 +60,24 @@ END;
 
 // Promotion represents a stored promotional content record.
 type Promotion struct {
-	ID              int64     `json:"id"`
-	RepoURL         string    `json:"repo_url"`
-	RepoName        string    `json:"repo_name"`
-	Headline        string    `json:"headline"`
-	Summary         string    `json:"summary"`
-	KeyBenefits     []string  `json:"key_benefits"`
-	Tags            []string  `json:"tags"`
-	TwitterPosts    []string  `json:"twitter_posts"`
-	LinkedInPost    string    `json:"linkedin_post"`
-	CallToAction    string    `json:"call_to_action"`
-	TargetChannel   string    `json:"target_channel"`
-	TargetAudience  string    `json:"target_audience"`
-	CreatedAt       time.Time `json:"created_at"`
-	Views14dTotal   int       `json:"views_14d_total"`
-	Views14dUnique  int       `json:"views_14d_unique"`
-	Clones14dTotal  int       `json:"clones_14d_total"`
-	Clones14dUnique int       `json:"clones_14d_unique"`
+	ID              int64           `json:"id"`
+	RepoURL         string          `json:"repo_url"`
+	RepoName        string          `json:"repo_name"`
+	Headline        string          `json:"headline"`
+	Summary         string          `json:"summary"`
+	KeyBenefits     []string        `json:"key_benefits"`
+	Tags            []string        `json:"tags"`
+	TwitterPosts    []string        `json:"twitter_posts"`
+	LinkedInPost    string          `json:"linkedin_post"`
+	CallToAction    string          `json:"call_to_action"`
+	TargetChannel   string          `json:"target_channel"`
+	TargetAudience  string          `json:"target_audience"`
+	CreatedAt       time.Time       `json:"created_at"`
+	Views14dTotal   int             `json:"views_14d_total"`
+	Views14dUnique  int             `json:"views_14d_unique"`
+	Clones14dTotal  int             `json:"clones_14d_total"`
+	Clones14dUnique int             `json:"clones_14d_unique"`
+	AnalysisJSON    json.RawMessage `json:"analysis"`
 }
 
 // Store is a SQLite-backed store for promotional content.
@@ -112,6 +113,7 @@ func (s *Store) applyMigrations() error {
 		"views_14d_unique INTEGER NOT NULL DEFAULT 0",
 		"clones_14d_total INTEGER NOT NULL DEFAULT 0",
 		"clones_14d_unique INTEGER NOT NULL DEFAULT 0",
+		"analysis_json TEXT DEFAULT NULL",
 	}
 	for _, col := range columns {
 		_, err := s.db.Exec("ALTER TABLE promotions ADD COLUMN " + col)
@@ -153,9 +155,15 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 	const q = `INSERT INTO promotions
 		(repo_url, repo_name, headline, summary, key_benefits, tags, twitter_posts,
 		 linkedin_post, call_to_action, target_channel, target_audience,
-		 views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
+		 analysis_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`
+
+	var analysisVal interface{}
+	if p.AnalysisJSON != nil {
+		analysisVal = string(p.AnalysisJSON)
+	}
 
 	var createdAt string
 	err = s.db.QueryRowContext(ctx, q,
@@ -164,6 +172,7 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 		p.LinkedInPost, p.CallToAction,
 		p.TargetChannel, p.TargetAudience,
 		p.Views14dTotal, p.Views14dUnique, p.Clones14dTotal, p.Clones14dUnique,
+		analysisVal,
 	).Scan(&p.ID, &createdAt)
 	if err != nil {
 		return fmt.Errorf("insert promotion: %w", err)
@@ -188,7 +197,8 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Promotio
 	const q = `SELECT p.id, p.repo_url, p.repo_name, p.headline, p.summary,
 		p.key_benefits, p.tags, p.twitter_posts, p.linkedin_post,
 		p.call_to_action, p.target_channel, p.target_audience, p.created_at,
-		p.views_14d_total, p.views_14d_unique, p.clones_14d_total, p.clones_14d_unique
+		p.views_14d_total, p.views_14d_unique, p.clones_14d_total, p.clones_14d_unique,
+		p.analysis_json
 		FROM promotions_fts fts
 		JOIN promotions p ON p.id = fts.rowid
 		WHERE promotions_fts MATCH ?
@@ -214,7 +224,8 @@ func (s *Store) List(ctx context.Context, limit int) ([]Promotion, error) {
 	const q = `SELECT id, repo_url, repo_name, headline, summary,
 		key_benefits, tags, twitter_posts, linkedin_post,
 		call_to_action, target_channel, target_audience, created_at,
-		views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique
+		views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
+		analysis_json
 		FROM promotions
 		ORDER BY created_at DESC
 		LIMIT ?`
@@ -235,11 +246,13 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 	for rows.Next() {
 		var p Promotion
 		var benefits, tags, tweets, createdAt string
+		var analysisJSON sql.NullString
 		if err := rows.Scan(
 			&p.ID, &p.RepoURL, &p.RepoName, &p.Headline, &p.Summary,
 			&benefits, &tags, &tweets, &p.LinkedInPost,
 			&p.CallToAction, &p.TargetChannel, &p.TargetAudience, &createdAt,
 			&p.Views14dTotal, &p.Views14dUnique, &p.Clones14dTotal, &p.Clones14dUnique,
+			&analysisJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan promotion: %w", err)
 		}
@@ -247,6 +260,9 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 		p.Tags = unmarshalJSONOrEmpty(tags)
 		p.TwitterPosts = unmarshalJSONOrEmpty(tweets)
 		p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		if analysisJSON.Valid {
+			p.AnalysisJSON = json.RawMessage(analysisJSON.String)
+		}
 		result = append(result, p)
 	}
 	if err := rows.Err(); err != nil {

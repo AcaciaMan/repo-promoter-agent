@@ -14,17 +14,19 @@ import (
 
 // GenerateHandler handles POST /api/generate requests.
 type GenerateHandler struct {
-	agentClient  *agent.Client
-	githubClient *github.Client
-	store        *store.Store
+	agentClient    *agent.Client
+	githubClient   *github.Client
+	store          *store.Store
+	analysisClient *agent.AnalysisClient
 }
 
 // NewGenerateHandler creates a GenerateHandler with all dependencies.
-func NewGenerateHandler(agentClient *agent.Client, githubClient *github.Client, st *store.Store) *GenerateHandler {
+func NewGenerateHandler(agentClient *agent.Client, githubClient *github.Client, st *store.Store, analysisClient *agent.AnalysisClient) *GenerateHandler {
 	return &GenerateHandler{
-		agentClient:  agentClient,
-		githubClient: githubClient,
-		store:        st,
+		agentClient:    agentClient,
+		githubClient:   githubClient,
+		store:          st,
+		analysisClient: analysisClient,
 	}
 }
 
@@ -93,6 +95,38 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Call the analysis agent (if configured).
+	var analysisJSON json.RawMessage
+	if h.analysisClient != nil {
+		analysisInput := agent.AnalysisInput{
+			RepoURL:          input.RepoURL,
+			RepoName:         input.RepoName,
+			ShortDescription: input.ShortDescription,
+			ReadmeText:       input.ReadmeSummary,
+			Topics:           input.Topics,
+			Metrics: agent.AnalysisMetrics{
+				Stars:           input.Metrics.Stars,
+				Forks:           input.Metrics.Forks,
+				Watchers:        input.Metrics.Watchers,
+				Views14dTotal:   input.Metrics.Views14dTotal,
+				Views14dUnique:  input.Metrics.Views14dUnique,
+				Clones14dTotal:  input.Metrics.Clones14dTotal,
+				Clones14dUnique: input.Metrics.Clones14dUnique,
+			},
+			TargetAudience: req.TargetAudience,
+		}
+
+		analysisOutput, analysisErr := h.analysisClient.Analyze(r.Context(), analysisInput)
+		if analysisErr != nil {
+			log.Printf("WARNING: analysis agent failed, proceeding without analysis: %v", analysisErr)
+		} else {
+			input.Analysis = analysisOutput
+			if raw, err := json.Marshal(analysisOutput); err == nil {
+				analysisJSON = raw
+			}
+		}
+	}
+
 	// Call the agent.
 	start := time.Now()
 	result, err := h.agentClient.Generate(r.Context(), input)
@@ -122,6 +156,7 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	promo.Views14dUnique = trafficMetrics.Views14dUnique
 	promo.Clones14dTotal = trafficMetrics.Clones14dTotal
 	promo.Clones14dUnique = trafficMetrics.Clones14dUnique
+	promo.AnalysisJSON = analysisJSON
 
 	// Store (best-effort — never fail the request because of a DB error).
 	if err := h.store.Save(r.Context(), &promo); err != nil {

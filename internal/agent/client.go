@@ -58,15 +58,16 @@ var promptTmpl = template.Must(template.New("prompt").Parse(promptTemplate))
 
 // RepoInput is the structured repo data sent to the agent.
 type RepoInput struct {
-	RepoURL          string      `json:"repo_url"`
-	RepoName         string      `json:"repo_name"`
-	ShortDescription string      `json:"short_description"`
-	ReadmeSummary    string      `json:"readme_summary"`
-	PrimaryLanguage  string      `json:"primary_language,omitempty"`
-	Topics           []string    `json:"topics,omitempty"`
-	Metrics          RepoMetrics `json:"metrics"`
-	TargetChannel    string      `json:"target_channel,omitempty"`
-	TargetAudience   string      `json:"target_audience,omitempty"`
+	RepoURL          string          `json:"repo_url"`
+	RepoName         string          `json:"repo_name"`
+	ShortDescription string          `json:"short_description"`
+	ReadmeSummary    string          `json:"readme_summary"`
+	PrimaryLanguage  string          `json:"primary_language,omitempty"`
+	Topics           []string        `json:"topics,omitempty"`
+	Metrics          RepoMetrics     `json:"metrics"`
+	TargetChannel    string          `json:"target_channel,omitempty"`
+	TargetAudience   string          `json:"target_audience,omitempty"`
+	Analysis         *AnalysisOutput `json:"analysis,omitempty"`
 }
 
 // RepoMetrics holds basic repo popularity numbers.

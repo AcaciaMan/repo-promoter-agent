@@ -23,6 +23,8 @@
         .btn-sm{font-size:.75rem;padding:.25rem .5rem;background:#555;border:none}
         .btn-sm:hover{background:#777}
         .status{color:#555;font-style:italic;margin:.5rem 0}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        .status:not(:empty){animation:pulse 1.5s ease-in-out infinite}
         .info-note{color:#0969da;font-size:.85rem;margin:.4rem 0}
         .error{color:#c00;margin:.5rem 0;white-space:pre-wrap}
         .card{background:#f8f9fa;border:1px solid #e1e4e8;border-radius:6px;padding:1rem;margin:.75rem 0}
@@ -47,6 +49,18 @@
         .traffic-block strong{display:block;margin-bottom:.25rem}
         .traffic-block .metric{display:inline-block;margin-right:1rem;color:#333}
         .hidden{display:none}
+        .analysis-panel{background:#f0fdf4;border:1px solid #86efac;border-left:4px solid #22c55e;border-radius:6px;padding:1rem;margin:.75rem 0}
+        .analysis-panel h4{margin:0 0 .25rem;font-size:1rem;color:#166534}
+        .analysis-label{font-size:.75rem;color:#888;margin-bottom:.75rem;font-style:italic}
+        .analysis-field{margin-bottom:.5rem}
+        .analysis-field strong{display:block;font-size:.85rem;color:#333;margin-bottom:.15rem}
+        .analysis-field p{margin:.2rem 0;font-size:.9rem}
+        .analysis-field ul{margin:.15rem 0 0 1.2rem;padding:0;font-size:.9rem}
+        .analysis-field li{margin:.15rem 0}
+        .analysis-snippet{color:#166534;font-size:.85rem;margin:.2rem 0 .4rem;padding-left:.25rem;border-left:2px solid #86efac}
+        .analysis-copyable{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;background:#fff;border:1px solid #d1fae5;border-radius:4px;padding:.4rem .6rem;margin-top:.15rem;font-size:.9rem}
+        .analysis-copyable span{flex:1}
+        .analysis-field strong[title]{cursor:help;border-bottom:1px dotted #999}
     </style>
 </head>
 <body>
@@ -96,6 +110,27 @@ function safeHref(url){try{const u=new URL(url);return(u.protocol==='https:'||u.
 function tweetCopyBtn(){return '<button class="btn-sm" aria-label="Copy tweet" onclick="event.stopPropagation();copyText(this.previousElementSibling.textContent,this)">Copy</button>'}
 function liCopyBtn(){return '<div class="li-copy-wrap"><button class="btn-sm" aria-label="Copy LinkedIn post" onclick="event.stopPropagation();copyText(this.parentElement.previousElementSibling.textContent,this)">Copy</button></div>'}
 function fmtDate(s){if(!s)return '';const d=new Date(s.includes('T')?s:s.replace(' ','T')+'Z');return isNaN(d.getTime())?s:d.toLocaleDateString()}
+function copyAnalysis(btn){const panel=btn.closest('.analysis-panel');if(!panel)return;const fields=panel.querySelectorAll('.analysis-field');let text='';fields.forEach(f=>{const label=f.querySelector('strong');const items=f.querySelectorAll('li');const p=f.querySelector('.analysis-copyable span')||f.querySelector('p');if(label)text+=label.textContent+':\n';if(p)text+=p.textContent+'\n';if(items.length){items.forEach(li=>{text+='- '+li.textContent+'\n'})}text+='\n'});navigator.clipboard.writeText(text.trim()).then(()=>{btn.textContent='Copied!';setTimeout(()=>{btn.textContent='Copy All'},1500)})}
+
+/* ---- progress indicator ---- */
+let progressTimers=[];
+function startProgress(){
+    const steps=[
+        {delay:0,text:'\uD83D\uDD0D Analyzing repository\u2026'},
+        {delay:8000,text:'\uD83D\uDD0D Still analyzing\u2026'},
+        {delay:15000,text:'\u270D\uFE0F Generating promotion\u2026'},
+        {delay:25000,text:'\u23F3 Almost there\u2026'},
+    ];
+    steps.forEach(step=>{
+        const t=setTimeout(()=>{genStatus.textContent=step.text},step.delay);
+        progressTimers.push(t);
+    });
+}
+function stopProgress(){
+    progressTimers.forEach(clearTimeout);
+    progressTimers=[];
+    genStatus.textContent='';
+}
 
 /* ---- GENERATE ---- */
 const genBtn=document.getElementById('gen-btn');
@@ -105,7 +140,7 @@ const genError=document.getElementById('gen-error');
 const genResult=document.getElementById('gen-result');
 
 genBtn.onclick=async()=>{
-    genStatus.textContent='Generating…';genInfo.textContent='';genError.textContent='';genResult.classList.add('hidden');genResult.innerHTML='';genBtn.disabled=true;
+    startProgress();genInfo.textContent='';genError.textContent='';genResult.classList.add('hidden');genResult.innerHTML='';genBtn.disabled=true;
     try{
         const body={target_channel:document.getElementById('channel').value,target_audience:document.getElementById('audience').value.trim()};
         const url=document.getElementById('repo-url').value.trim();
@@ -117,7 +152,7 @@ genBtn.onclick=async()=>{
         genResult.classList.remove('hidden');
         if(!url)genInfo.textContent='\u2139\uFE0F Using sample repo (no URL provided)';
     }catch(e){genError.textContent='Error: '+e.message}
-    finally{genStatus.textContent='';genBtn.disabled=false}
+    finally{stopProgress();genBtn.disabled=false}
 };
 
 function renderFull(d){
@@ -128,6 +163,7 @@ function renderFull(d){
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
     if(d.tags&&d.tags.length){h+='<div class="pills">';d.tags.forEach(t=>{h+='<span class="pill">'+esc(t)+'</span>'});h+='</div>'}
     h+=renderTraffic(d);
+    h+=renderAnalysis(d.analysis);
     if(d.id){h+='<div class="meta">ID: '+d.id+' · Saved: '+esc(d.created_at||'')+'</div>'}
     h+='<br><button class="toggle" onclick="toggleRaw()">Show raw JSON</button><pre class="hidden" id="raw-json">'+esc(JSON.stringify(d,null,2))+'</pre>';
     h+='</div>';
@@ -141,6 +177,42 @@ function renderTraffic(d){
         +'<span class="metric">👁 Views: '+(d.views_14d_total||0)+' total / '+(d.views_14d_unique||0)+' unique</span>'
         +'<span class="metric">📦 Clones: '+(d.clones_14d_total||0)+' total / '+(d.clones_14d_unique||0)+' unique</span>'
         +'</div>';
+}
+
+function renderAnalysis(analysis){
+    if(!analysis)return '';
+    let h='<div class="analysis-panel">';
+    h+='<h4>🔍 Why This Repo?</h4>';
+    h+='<div class="analysis-label">AI-generated analysis</div>';
+    if(analysis.primary_value_proposition){
+        h+='<div class="analysis-field"><strong title="The core problem this repo solves, in one sentence">Value Proposition</strong>'
+          +'<div class="analysis-copyable"><span>'+esc(analysis.primary_value_proposition)+'</span>'
+          +'<button class="btn-sm" aria-label="Copy value proposition" onclick="event.stopPropagation();copyText(this.previousElementSibling.textContent,this)">Copy</button>'
+          +'</div></div>';
+    }
+    if(analysis.ideal_audience&&analysis.ideal_audience.length){
+        h+='<div class="analysis-field"><strong title="Who would benefit most from using this repo">Ideal Audience</strong><ul>';analysis.ideal_audience.forEach(a=>{h+='<li>'+esc(a)+'</li>'});h+='</ul></div>';
+    }
+    if(analysis.key_features&&analysis.key_features.length){
+        h+='<div class="analysis-field"><strong title="Main capabilities framed as user benefits">Key Features</strong><ul>';analysis.key_features.forEach(f=>{h+='<li>'+esc(f)+'</li>'});h+='</ul></div>';
+    }
+    if(analysis.differentiators&&analysis.differentiators.length){
+        h+='<div class="analysis-field"><strong title="What sets this repo apart from alternatives">Differentiators</strong><ul>';analysis.differentiators.forEach(x=>{h+='<li>'+esc(x)+'</li>'});h+='</ul></div>';
+    }
+    if(analysis.risk_or_limitations&&analysis.risk_or_limitations.length){
+        h+='<div class="analysis-field"><strong title="Potential concerns or gaps to be aware of">Risks & Limitations</strong><ul>';analysis.risk_or_limitations.forEach(r=>{h+='<li>'+esc(r)+'</li>'});h+='</ul></div>';
+    }
+    if(analysis.social_proof_signals&&analysis.social_proof_signals.length){
+        h+='<div class="analysis-field"><strong title="Traction signals based on stars, traffic, and community">Social Proof</strong><ul>';analysis.social_proof_signals.forEach(s=>{h+='<li>'+esc(s)+'</li>'});h+='</ul></div>';
+    }
+    if(analysis.recommended_positioning_angle&&analysis.recommended_positioning_angle.length){
+        h+='<div class="analysis-field"><strong title="Suggested ways to pitch this repo to different audiences">Positioning Angles</strong><ul>';analysis.recommended_positioning_angle.forEach(a=>{h+='<li>'+esc(a)+'</li>'});h+='</ul></div>';
+    }
+    h+='<div style="text-align:right;margin-top:.5rem">'
+      +'<button class="btn-sm" aria-label="Copy all analysis" onclick="event.stopPropagation();copyAnalysis(this)">Copy All</button>'
+      +'</div>';
+    h+='</div>';
+    return h;
 }
 
 function toggleRaw(){const el=document.getElementById('raw-json');el.classList.toggle('hidden');const btn=el.previousElementSibling;btn.textContent=el.classList.contains('hidden')?'Show raw JSON':'Hide raw JSON'}
@@ -176,6 +248,7 @@ function renderCompact(p){
     return '<div class="card compact-card" onclick="this.querySelector(\'.expand\').classList.toggle(\'hidden\')">'
         +'<h3><a href="'+safeHref(p.repo_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">'+esc(p.repo_name)+'</a></h3>'
         +'<p>'+esc(p.headline)+'</p>'
+        +renderAnalysisCompact(p.analysis)
         +(firstTweet?'<p class="meta" style="color:#333">\uD83D\uDC26 '+esc(firstTweet)+'</p>':'')
         +'<div class="pills">'+tags+'</div>'
         +renderTrafficCompact(p)
@@ -191,7 +264,13 @@ function renderExpandedBody(d){
     if(d.linkedin_post){h+='<strong>LinkedIn Post</strong><div class="linkedin-block">'+esc(d.linkedin_post)+'</div>'+liCopyBtn()}
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
     h+=renderTraffic(d);
+    h+=renderAnalysis(d.analysis);
     return h;
+}
+
+function renderAnalysisCompact(analysis){
+    if(!analysis||!analysis.primary_value_proposition)return '';
+    return '<p class="analysis-snippet">💡 '+esc(analysis.primary_value_proposition)+'</p>';
 }
 
 function renderTrafficCompact(d){
