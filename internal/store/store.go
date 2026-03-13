@@ -73,6 +73,9 @@ type Promotion struct {
 	TargetChannel   string          `json:"target_channel"`
 	TargetAudience  string          `json:"target_audience"`
 	CreatedAt       time.Time       `json:"created_at"`
+	Stars           int             `json:"stars"`
+	Forks           int             `json:"forks"`
+	Watchers        int             `json:"watchers"`
 	Views14dTotal   int             `json:"views_14d_total"`
 	Views14dUnique  int             `json:"views_14d_unique"`
 	Clones14dTotal  int             `json:"clones_14d_total"`
@@ -114,6 +117,9 @@ func (s *Store) applyMigrations() error {
 		"clones_14d_total INTEGER NOT NULL DEFAULT 0",
 		"clones_14d_unique INTEGER NOT NULL DEFAULT 0",
 		"analysis_json TEXT DEFAULT NULL",
+		"stars INTEGER NOT NULL DEFAULT 0",
+		"forks INTEGER NOT NULL DEFAULT 0",
+		"watchers INTEGER NOT NULL DEFAULT 0",
 	}
 	for _, col := range columns {
 		_, err := s.db.Exec("ALTER TABLE promotions ADD COLUMN " + col)
@@ -155,9 +161,10 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 	const q = `INSERT INTO promotions
 		(repo_url, repo_name, headline, summary, key_benefits, tags, twitter_posts,
 		 linkedin_post, call_to_action, target_channel, target_audience,
+		 stars, forks, watchers,
 		 views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
 		 analysis_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`
 
 	var analysisVal interface{}
@@ -171,6 +178,7 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 		benefits, tags, tweets,
 		p.LinkedInPost, p.CallToAction,
 		p.TargetChannel, p.TargetAudience,
+		p.Stars, p.Forks, p.Watchers,
 		p.Views14dTotal, p.Views14dUnique, p.Clones14dTotal, p.Clones14dUnique,
 		analysisVal,
 	).Scan(&p.ID, &createdAt)
@@ -197,6 +205,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Promotio
 	const q = `SELECT p.id, p.repo_url, p.repo_name, p.headline, p.summary,
 		p.key_benefits, p.tags, p.twitter_posts, p.linkedin_post,
 		p.call_to_action, p.target_channel, p.target_audience, p.created_at,
+		p.stars, p.forks, p.watchers,
 		p.views_14d_total, p.views_14d_unique, p.clones_14d_total, p.clones_14d_unique,
 		p.analysis_json
 		FROM promotions_fts fts
@@ -224,6 +233,7 @@ func (s *Store) List(ctx context.Context, limit int) ([]Promotion, error) {
 	const q = `SELECT id, repo_url, repo_name, headline, summary,
 		key_benefits, tags, twitter_posts, linkedin_post,
 		call_to_action, target_channel, target_audience, created_at,
+		stars, forks, watchers,
 		views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
 		analysis_json
 		FROM promotions
@@ -251,6 +261,7 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 			&p.ID, &p.RepoURL, &p.RepoName, &p.Headline, &p.Summary,
 			&benefits, &tags, &tweets, &p.LinkedInPost,
 			&p.CallToAction, &p.TargetChannel, &p.TargetAudience, &createdAt,
+			&p.Stars, &p.Forks, &p.Watchers,
 			&p.Views14dTotal, &p.Views14dUnique, &p.Clones14dTotal, &p.Clones14dUnique,
 			&analysisJSON,
 		); err != nil {

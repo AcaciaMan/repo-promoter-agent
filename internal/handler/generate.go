@@ -151,7 +151,10 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	promo.TargetChannel = req.TargetChannel
 	promo.TargetAudience = req.TargetAudience
 
-	// Copy traffic metrics to promotion for DB storage and UI display.
+	// Copy repo metrics to promotion for DB storage and UI display.
+	promo.Stars = input.Metrics.Stars
+	promo.Forks = input.Metrics.Forks
+	promo.Watchers = input.Metrics.Watchers
 	promo.Views14dTotal = trafficMetrics.Views14dTotal
 	promo.Views14dUnique = trafficMetrics.Views14dUnique
 	promo.Clones14dTotal = trafficMetrics.Clones14dTotal

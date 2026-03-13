@@ -187,12 +187,23 @@ function renderFull(d){
     if(d.linkedin_post){h+='<strong>LinkedIn Post</strong><div class="linkedin-block">'+esc(d.linkedin_post)+'</div>'+liCopyBtn()}
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
     if(d.tags&&d.tags.length){h+='<div class="pills">';d.tags.forEach(t=>{h+='<span class="pill">'+esc(t)+'</span>'});h+='</div>'}
+    h+=renderRepoStats(d);
     h+=renderTraffic(d);
     h+=renderAnalysis(d.analysis);
     if(d.id){h+='<div class="meta">ID: '+d.id+' · Saved: '+esc(d.created_at||'')+'</div>'}
     h+='<br><button class="toggle" onclick="toggleRaw()">Show raw JSON</button><pre class="hidden" id="raw-json">'+esc(JSON.stringify(d,null,2))+'</pre>';
     h+='</div>';
     return h;
+}
+
+function renderRepoStats(d){
+    if(!d.stars && !d.forks && !d.watchers) return '';
+    return '<div class="traffic-block">'
+        +'<strong>⭐ Repository Stats</strong>'
+        +'<span class="metric">⭐ Stars: '+(d.stars||0)+'</span>'
+        +'<span class="metric">🍴 Forks: '+(d.forks||0)+'</span>'
+        +'<span class="metric">👀 Watchers: '+(d.watchers||0)+'</span>'
+        +'</div>';
 }
 
 function renderTraffic(d){
@@ -272,10 +283,12 @@ function renderCompact(p){
     const date=fmtDate(p.created_at);
     return '<div class="card compact-card" onclick="this.querySelector(\'.expand\').classList.toggle(\'hidden\')">'
         +'<h3><a href="'+safeHref(p.repo_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">'+esc(p.repo_name)+'</a></h3>'
+        +'<div class="meta" style="user-select:all;cursor:text" onclick="event.stopPropagation()">'+esc(p.repo_url)+'</div>'
         +'<p>'+esc(p.headline)+'</p>'
         +renderAnalysisCompact(p.analysis)
         +(firstTweet?'<p class="meta" style="color:#333">\uD83D\uDC26 '+esc(firstTweet)+'</p>':'')
         +'<div class="pills">'+tags+'</div>'
+        +renderStatsCompact(p)
         +renderTrafficCompact(p)
         +'<div class="meta">'+esc(date)+'</div>'
         +'<div class="expand hidden" style="margin-top:.75rem">'+renderExpandedBody(p)+'</div>'
@@ -288,6 +301,7 @@ function renderExpandedBody(d){
     if(d.twitter_posts&&d.twitter_posts.length){h+='<strong>Twitter Posts</strong>';d.twitter_posts.forEach(t=>{h+='<div class="tweet"><span>'+esc(t)+'</span>'+tweetCopyBtn()+'</div>'})}
     if(d.linkedin_post){h+='<strong>LinkedIn Post</strong><div class="linkedin-block">'+esc(d.linkedin_post)+'</div>'+liCopyBtn()}
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
+    h+=renderRepoStats(d);
     h+=renderTraffic(d);
     h+=renderAnalysis(d.analysis);
     return h;
@@ -296,6 +310,11 @@ function renderExpandedBody(d){
 function renderAnalysisCompact(analysis){
     if(!analysis||!analysis.primary_value_proposition)return '';
     return '<p class="analysis-snippet">💡 '+esc(analysis.primary_value_proposition)+'</p>';
+}
+
+function renderStatsCompact(d){
+    if(!d.stars && !d.forks && !d.watchers) return '';
+    return '<div class="meta" style="color:#0969da">⭐ '+(d.stars||0)+' \u00b7 🍴 '+(d.forks||0)+' \u00b7 👀 '+(d.watchers||0)+'</div>';
 }
 
 function renderTrafficCompact(d){
