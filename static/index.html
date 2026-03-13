@@ -43,6 +43,9 @@
         .compact-card h3 a{color:#0969da;text-decoration:none}
         .compact-card h3 a:hover{text-decoration:underline}
         .meta{font-size:.8rem;color:#666}
+        .traffic-block{background:#f0f7ff;border:1px solid #c8e1ff;border-radius:4px;padding:.5rem .75rem;margin:.5rem 0;font-size:.9rem}
+        .traffic-block strong{display:block;margin-bottom:.25rem}
+        .traffic-block .metric{display:inline-block;margin-right:1rem;color:#333}
         .hidden{display:none}
     </style>
 </head>
@@ -124,10 +127,20 @@ function renderFull(d){
     if(d.linkedin_post){h+='<strong>LinkedIn Post</strong><div class="linkedin-block">'+esc(d.linkedin_post)+'</div>'+liCopyBtn()}
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
     if(d.tags&&d.tags.length){h+='<div class="pills">';d.tags.forEach(t=>{h+='<span class="pill">'+esc(t)+'</span>'});h+='</div>'}
+    h+=renderTraffic(d);
     if(d.id){h+='<div class="meta">ID: '+d.id+' · Saved: '+esc(d.created_at||'')+'</div>'}
     h+='<br><button class="toggle" onclick="toggleRaw()">Show raw JSON</button><pre class="hidden" id="raw-json">'+esc(JSON.stringify(d,null,2))+'</pre>';
     h+='</div>';
     return h;
+}
+
+function renderTraffic(d){
+    if(!d.views_14d_total && !d.views_14d_unique && !d.clones_14d_total && !d.clones_14d_unique) return '';
+    return '<div class="traffic-block">'
+        +'<strong>📊 Traffic (last 14 days)</strong>'
+        +'<span class="metric">👁 Views: '+(d.views_14d_total||0)+' total / '+(d.views_14d_unique||0)+' unique</span>'
+        +'<span class="metric">📦 Clones: '+(d.clones_14d_total||0)+' total / '+(d.clones_14d_unique||0)+' unique</span>'
+        +'</div>';
 }
 
 function toggleRaw(){const el=document.getElementById('raw-json');el.classList.toggle('hidden');const btn=el.previousElementSibling;btn.textContent=el.classList.contains('hidden')?'Show raw JSON':'Hide raw JSON'}
@@ -165,6 +178,7 @@ function renderCompact(p){
         +'<p>'+esc(p.headline)+'</p>'
         +(firstTweet?'<p class="meta" style="color:#333">\uD83D\uDC26 '+esc(firstTweet)+'</p>':'')
         +'<div class="pills">'+tags+'</div>'
+        +renderTrafficCompact(p)
         +'<div class="meta">'+esc(date)+'</div>'
         +'<div class="expand hidden" style="margin-top:.75rem">'+renderExpandedBody(p)+'</div>'
         +'</div>';
@@ -176,7 +190,13 @@ function renderExpandedBody(d){
     if(d.twitter_posts&&d.twitter_posts.length){h+='<strong>Twitter Posts</strong>';d.twitter_posts.forEach(t=>{h+='<div class="tweet"><span>'+esc(t)+'</span>'+tweetCopyBtn()+'</div>'})}
     if(d.linkedin_post){h+='<strong>LinkedIn Post</strong><div class="linkedin-block">'+esc(d.linkedin_post)+'</div>'+liCopyBtn()}
     if(d.call_to_action){h+='<div class="cta">'+esc(d.call_to_action)+'</div>'}
+    h+=renderTraffic(d);
     return h;
+}
+
+function renderTrafficCompact(d){
+    if(!d.views_14d_total && !d.views_14d_unique && !d.clones_14d_total && !d.clones_14d_unique) return '';
+    return '<div class="meta" style="color:#0969da">📊 Views: '+(d.views_14d_total||0)+' \u00b7 Clones: '+(d.clones_14d_total||0)+'</div>';
 }
 
 /* load recent on page load */

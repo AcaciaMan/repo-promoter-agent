@@ -60,19 +60,23 @@ END;
 
 // Promotion represents a stored promotional content record.
 type Promotion struct {
-	ID             int64     `json:"id"`
-	RepoURL        string    `json:"repo_url"`
-	RepoName       string    `json:"repo_name"`
-	Headline       string    `json:"headline"`
-	Summary        string    `json:"summary"`
-	KeyBenefits    []string  `json:"key_benefits"`
-	Tags           []string  `json:"tags"`
-	TwitterPosts   []string  `json:"twitter_posts"`
-	LinkedInPost   string    `json:"linkedin_post"`
-	CallToAction   string    `json:"call_to_action"`
-	TargetChannel  string    `json:"target_channel"`
-	TargetAudience string    `json:"target_audience"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	RepoURL         string    `json:"repo_url"`
+	RepoName        string    `json:"repo_name"`
+	Headline        string    `json:"headline"`
+	Summary         string    `json:"summary"`
+	KeyBenefits     []string  `json:"key_benefits"`
+	Tags            []string  `json:"tags"`
+	TwitterPosts    []string  `json:"twitter_posts"`
+	LinkedInPost    string    `json:"linkedin_post"`
+	CallToAction    string    `json:"call_to_action"`
+	TargetChannel   string    `json:"target_channel"`
+	TargetAudience  string    `json:"target_audience"`
+	CreatedAt       time.Time `json:"created_at"`
+	Views14dTotal   int       `json:"views_14d_total"`
+	Views14dUnique  int       `json:"views_14d_unique"`
+	Clones14dTotal  int       `json:"clones_14d_total"`
+	Clones14dUnique int       `json:"clones_14d_unique"`
 }
 
 // Store is a SQLite-backed store for promotional content.
@@ -93,7 +97,29 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("initialize schema: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.applyMigrations(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
+
+	return s, nil
+}
+
+func (s *Store) applyMigrations() error {
+	columns := []string{
+		"views_14d_total INTEGER NOT NULL DEFAULT 0",
+		"views_14d_unique INTEGER NOT NULL DEFAULT 0",
+		"clones_14d_total INTEGER NOT NULL DEFAULT 0",
+		"clones_14d_unique INTEGER NOT NULL DEFAULT 0",
+	}
+	for _, col := range columns {
+		_, err := s.db.Exec("ALTER TABLE promotions ADD COLUMN " + col)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migration failed: %w", err)
+		}
+	}
+	return nil
 }
 
 // Close closes the underlying database connection.
@@ -126,8 +152,9 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 
 	const q = `INSERT INTO promotions
 		(repo_url, repo_name, headline, summary, key_benefits, tags, twitter_posts,
-		 linkedin_post, call_to_action, target_channel, target_audience)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 linkedin_post, call_to_action, target_channel, target_audience,
+		 views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`
 
 	var createdAt string
@@ -136,6 +163,7 @@ func (s *Store) Save(ctx context.Context, p *Promotion) error {
 		benefits, tags, tweets,
 		p.LinkedInPost, p.CallToAction,
 		p.TargetChannel, p.TargetAudience,
+		p.Views14dTotal, p.Views14dUnique, p.Clones14dTotal, p.Clones14dUnique,
 	).Scan(&p.ID, &createdAt)
 	if err != nil {
 		return fmt.Errorf("insert promotion: %w", err)
@@ -159,7 +187,8 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Promotio
 
 	const q = `SELECT p.id, p.repo_url, p.repo_name, p.headline, p.summary,
 		p.key_benefits, p.tags, p.twitter_posts, p.linkedin_post,
-		p.call_to_action, p.target_channel, p.target_audience, p.created_at
+		p.call_to_action, p.target_channel, p.target_audience, p.created_at,
+		p.views_14d_total, p.views_14d_unique, p.clones_14d_total, p.clones_14d_unique
 		FROM promotions_fts fts
 		JOIN promotions p ON p.id = fts.rowid
 		WHERE promotions_fts MATCH ?
@@ -184,7 +213,8 @@ func (s *Store) List(ctx context.Context, limit int) ([]Promotion, error) {
 
 	const q = `SELECT id, repo_url, repo_name, headline, summary,
 		key_benefits, tags, twitter_posts, linkedin_post,
-		call_to_action, target_channel, target_audience, created_at
+		call_to_action, target_channel, target_audience, created_at,
+		views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique
 		FROM promotions
 		ORDER BY created_at DESC
 		LIMIT ?`
@@ -209,6 +239,7 @@ func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
 			&p.ID, &p.RepoURL, &p.RepoName, &p.Headline, &p.Summary,
 			&benefits, &tags, &tweets, &p.LinkedInPost,
 			&p.CallToAction, &p.TargetChannel, &p.TargetAudience, &createdAt,
+			&p.Views14dTotal, &p.Views14dUnique, &p.Clones14dTotal, &p.Clones14dUnique,
 		); err != nil {
 			return nil, fmt.Errorf("scan promotion: %w", err)
 		}

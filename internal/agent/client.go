@@ -32,7 +32,13 @@ RULES:
 - linkedin_post should be 150–300 words with professional tone.
 - If target_channel is "twitter", optimize tone for Twitter. If "linkedin", optimize for LinkedIn. Always populate all fields regardless.
 - Stay faithful to the repo data. Do not invent features not described in the input.
-- Tailor content to target_audience if provided.`
+- Tailor content to target_audience if provided.
+- The metrics field may include views_14d_total, views_14d_unique, clones_14d_total, and clones_14d_unique (14-day traffic data). If these are present and non-zero:
+  - You may describe the project as being actively discovered or attracting attention.
+  - Reflect the relative level (low: <50 views, moderate: 50–200, high: >200) naturally in the tone — do not cite exact numbers.
+  - Use phrases like "gaining traction", "actively explored by developers", "attracting growing interest" when appropriate.
+- If traffic metrics are absent or zero, keep tone neutral regarding popularity. Do not make claims about the project being widely used or popular.
+- Never fabricate or exaggerate traffic numbers. Only use the metrics to subtly adjust tone, not to make specific numerical claims.`
 
 const outputSchema = `{
   "repo_url": "string",
@@ -65,10 +71,14 @@ type RepoInput struct {
 
 // RepoMetrics holds basic repo popularity numbers.
 type RepoMetrics struct {
-	Stars      int `json:"stars"`
-	Forks      int `json:"forks"`
-	Watchers   int `json:"watchers"`
-	OpenIssues int `json:"open_issues"`
+	Stars           int `json:"stars"`
+	Forks           int `json:"forks"`
+	Watchers        int `json:"watchers"`
+	OpenIssues      int `json:"open_issues"`
+	Views14dTotal   int `json:"views_14d_total,omitempty"`
+	Views14dUnique  int `json:"views_14d_unique,omitempty"`
+	Clones14dTotal  int `json:"clones_14d_total,omitempty"`
+	Clones14dUnique int `json:"clones_14d_unique,omitempty"`
 }
 
 // --- Chat completion request/response types ---

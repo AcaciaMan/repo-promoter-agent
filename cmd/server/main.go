@@ -43,7 +43,14 @@ func main() {
 
 	// Create clients.
 	agentClient := agent.NewClient(endpoint, accessKey)
-	githubClient := github.NewClient()
+
+	ghToken := os.Getenv("GITHUB_TOKEN")
+	if ghToken != "" {
+		log.Println("GitHub token configured — authenticated API access enabled")
+	} else {
+		log.Println("No GITHUB_TOKEN set — using unauthenticated GitHub API (60 req/hr limit)")
+	}
+	githubClient := github.NewClient(ghToken)
 
 	// Set up routes.
 	mux := http.NewServeMux()

@@ -70,6 +70,29 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	input.TargetChannel = req.TargetChannel
 	input.TargetAudience = req.TargetAudience
 
+	// Fetch traffic metrics for AcaciaMan repos (best-effort) — needed
+	// both for agent input (tone adjustment) and for storage/UI.
+	var trafficMetrics github.TrafficMetrics
+	if repoURL != "" {
+		owner := github.RepoOwner(repoURL)
+		if owner == "AcaciaMan" && h.githubClient.HasToken() {
+			_, repoName, parseErr := github.ParseRepoURL(repoURL)
+			if parseErr == nil {
+				tm, mErr := h.githubClient.FetchTrafficMetrics(r.Context(), owner, repoName)
+				if mErr != nil {
+					log.Printf("WARNING: traffic metrics fetch failed for %s/%s: %v", owner, repoName, mErr)
+				} else {
+					trafficMetrics = tm
+					// Include in agent input so they influence generated tone.
+					input.Metrics.Views14dTotal = tm.Views14dTotal
+					input.Metrics.Views14dUnique = tm.Views14dUnique
+					input.Metrics.Clones14dTotal = tm.Clones14dTotal
+					input.Metrics.Clones14dUnique = tm.Clones14dUnique
+				}
+			}
+		}
+	}
+
 	// Call the agent.
 	start := time.Now()
 	result, err := h.agentClient.Generate(r.Context(), input)
@@ -93,6 +116,12 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	promo.TargetChannel = req.TargetChannel
 	promo.TargetAudience = req.TargetAudience
+
+	// Copy traffic metrics to promotion for DB storage and UI display.
+	promo.Views14dTotal = trafficMetrics.Views14dTotal
+	promo.Views14dUnique = trafficMetrics.Views14dUnique
+	promo.Clones14dTotal = trafficMetrics.Clones14dTotal
+	promo.Clones14dUnique = trafficMetrics.Clones14dUnique
 
 	// Store (best-effort — never fail the request because of a DB error).
 	if err := h.store.Save(r.Context(), &promo); err != nil {

@@ -150,6 +150,7 @@ The agent is instructed to:
 - No complex metrics dashboards or analytics beyond basic storage.  
 - No need to support private repositories initially.  
 - No multi‑agent orchestration; a **single agent** is enough for MVP.
+- Currently optimized for the maintainer’s own repos; can be extended to multi‑user via a GitHub App.
 
 ***
 
