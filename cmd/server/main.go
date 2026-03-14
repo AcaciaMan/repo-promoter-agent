@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"repo-promoter-agent/internal/agent"
+	"repo-promoter-agent/internal/analytics"
 	"repo-promoter-agent/internal/github"
 	"repo-promoter-agent/internal/handler"
 	"repo-promoter-agent/internal/ratelimit"
@@ -84,10 +85,16 @@ func main() {
 	defer stopCleanup()
 	log.Printf("Rate limiter enabled: generate=%d/5m0s, search=%d/5m0s", generateMax, searchMax)
 
+	// Create search analytics tracker.
+	tracker := analytics.NewTracker()
+
 	// Set up routes.
 	mux := http.NewServeMux()
 	mux.Handle("/api/generate", limiter.Middleware("generate")(handler.NewGenerateHandler(agentClient, githubClient, st, analysisClient)))
-	mux.Handle("/api/search", limiter.Middleware("search")(handler.NewSearchHandler(st)))
+	mux.Handle("/api/search", limiter.Middleware("search")(handler.NewSearchHandler(st, tracker)))
+	mux.Handle("/api/suggest", limiter.Middleware("search")(handler.NewSuggestHandler(st)))
+	mux.Handle("/api/mlt", limiter.Middleware("search")(handler.NewMLTHandler(st)))
+	mux.Handle("/api/analytics/popular", limiter.Middleware("search")(handler.NewPopularHandler(tracker)))
 	mux.Handle("/", noCacheHandler(http.FileServerFS(static.Files)))
 
 	addr := ":" + port

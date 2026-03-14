@@ -99,21 +99,21 @@ func TestSave_WithAnalysis(t *testing.T) {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	results, err := st.List(ctx, 1)
+	sr, err := st.List(ctx, 1, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(sr.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(sr.Results))
 	}
-	if results[0].AnalysisJSON == nil {
+	if sr.Results[0].AnalysisJSON == nil {
 		t.Fatal("expected AnalysisJSON to be non-nil")
 	}
-	if !json.Valid(results[0].AnalysisJSON) {
+	if !json.Valid(sr.Results[0].AnalysisJSON) {
 		t.Fatal("AnalysisJSON is not valid JSON")
 	}
 	var m map[string]interface{}
-	if err := json.Unmarshal(results[0].AnalysisJSON, &m); err != nil {
+	if err := json.Unmarshal(sr.Results[0].AnalysisJSON, &m); err != nil {
 		t.Fatalf("failed to unmarshal AnalysisJSON: %v", err)
 	}
 	if _, ok := m["primary_value_proposition"]; !ok {
@@ -133,15 +133,15 @@ func TestSave_WithoutAnalysis(t *testing.T) {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	results, err := st.List(ctx, 1)
+	sr, err := st.List(ctx, 1, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(sr.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(sr.Results))
 	}
-	if results[0].AnalysisJSON != nil {
-		t.Errorf("expected AnalysisJSON to be nil, got %s", results[0].AnalysisJSON)
+	if sr.Results[0].AnalysisJSON != nil {
+		t.Errorf("expected AnalysisJSON to be nil, got %s", sr.Results[0].AnalysisJSON)
 	}
 }
 
@@ -162,15 +162,15 @@ func TestSave_Upsert(t *testing.T) {
 		t.Fatalf("Save() second error: %v", err)
 	}
 
-	results, err := st.List(ctx, 10)
+	sr, err := st.List(ctx, 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result (upsert), got %d", len(results))
+	if len(sr.Results) != 1 {
+		t.Fatalf("expected 1 result (upsert), got %d", len(sr.Results))
 	}
-	if results[0].Headline != "Updated" {
-		t.Errorf("expected headline %q, got %q", "Updated", results[0].Headline)
+	if sr.Results[0].Headline != "Updated" {
+		t.Errorf("expected headline %q, got %q", "Updated", sr.Results[0].Headline)
 	}
 }
 
@@ -185,15 +185,15 @@ func TestSearch_FullText(t *testing.T) {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	results, err := st.Search(ctx, "kubernetes", 10)
+	sr, err := st.Search(ctx, "kubernetes", 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(sr.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(sr.Results))
 	}
-	if results[0].RepoName != "testrepo" {
-		t.Errorf("expected repo_name %q, got %q", "testrepo", results[0].RepoName)
+	if sr.Results[0].RepoName != "testrepo" {
+		t.Errorf("expected repo_name %q, got %q", "testrepo", sr.Results[0].RepoName)
 	}
 }
 
@@ -202,12 +202,12 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	results, err := st.Search(ctx, "", 10)
+	sr, err := st.Search(ctx, "", 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 results for empty query, got %d", len(results))
+	if len(sr.Results) != 0 {
+		t.Errorf("expected 0 results for empty query, got %d", len(sr.Results))
 	}
 }
 
@@ -216,12 +216,12 @@ func TestSearch_NoMatch(t *testing.T) {
 	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	results, err := st.Search(ctx, "nonexistent", 10)
+	sr, err := st.Search(ctx, "nonexistent", 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
+	if len(sr.Results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(sr.Results))
 	}
 }
 
@@ -246,18 +246,18 @@ func TestList_OrderByDate(t *testing.T) {
 		t.Fatalf("Save(beta) error: %v", err)
 	}
 
-	results, err := st.List(ctx, 10)
+	sr, err := st.List(ctx, 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+	if len(sr.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(sr.Results))
 	}
-	if results[0].RepoName != "beta" {
-		t.Errorf("expected first result to be beta (more recent), got %q", results[0].RepoName)
+	if sr.Results[0].RepoName != "beta" {
+		t.Errorf("expected first result to be beta (more recent), got %q", sr.Results[0].RepoName)
 	}
-	if results[1].RepoName != "alpha" {
-		t.Errorf("expected second result to be alpha (older), got %q", results[1].RepoName)
+	if sr.Results[1].RepoName != "alpha" {
+		t.Errorf("expected second result to be alpha (older), got %q", sr.Results[1].RepoName)
 	}
 }
 
@@ -276,12 +276,12 @@ func TestList_RespectsLimit(t *testing.T) {
 		}
 	}
 
-	results, err := st.List(ctx, 2)
+	sr, err := st.List(ctx, 2, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 2 {
-		t.Errorf("expected 2 results with limit 2, got %d", len(results))
+	if len(sr.Results) != 2 {
+		t.Errorf("expected 2 results with limit 2, got %d", len(sr.Results))
 	}
 }
 
@@ -290,15 +290,15 @@ func TestList_Empty(t *testing.T) {
 	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	results, err := st.List(ctx, 10)
+	sr, err := st.List(ctx, 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if results == nil {
+	if sr.Results == nil {
 		t.Fatal("expected non-nil empty slice, got nil")
 	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
+	if len(sr.Results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(sr.Results))
 	}
 }
 
@@ -313,7 +313,7 @@ func TestSearch_SpecialCharacters(t *testing.T) {
 	}
 
 	// Should not crash — query is sanitized
-	_, err := st.Search(ctx, "C++ (advanced)", 10)
+	_, err := st.Search(ctx, "C++ (advanced)", 10, SearchOptions{})
 	if err != nil {
 		t.Fatalf("Search() with special chars error: %v", err)
 	}
@@ -337,15 +337,15 @@ func TestSave_WithTrafficMetrics(t *testing.T) {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	results, err := st.List(ctx, 1)
+	sr, err := st.List(ctx, 1, SearchOptions{})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(sr.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(sr.Results))
 	}
 
-	r := results[0]
+	r := sr.Results[0]
 	if r.Stars != 42 {
 		t.Errorf("Stars = %d, want 42", r.Stars)
 	}
