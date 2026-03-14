@@ -118,6 +118,7 @@ internal/ratelimit/clientkey.go  — Client IP extraction (X-Forwarded-For aware
 | `ANALYSIS_AGENT_ACCESS_KEY` | No | —            | API key for the Analysis Agent                            |
 | `RATE_LIMIT_GENERATE_MAX` | No | `5`            | Max generate requests per client per 5-min window         |
 | `RATE_LIMIT_SEARCH_MAX`   | No | `100`          | Max search requests per client per 5-min window           |
+| `CORS_ALLOWED_ORIGINS`    | No | _(empty — same-origin only)_ | Comma-separated list of allowed origins for cross-origin requests (e.g., `https://app.example.com,http://localhost:3000`). When empty, no CORS headers are sent. |
 
 ### Solr Setup (Local Development)
 
@@ -239,6 +240,25 @@ When a client exceeds the limit, the server responds with HTTP 429 and:
 - A JSON body: `{"error": "rate limit exceeded", "retry_after_seconds": 42}`.
 
 Behind a reverse proxy (like DigitalOcean App Platform), the limiter uses the `X-Forwarded-For` header for client identification.
+
+## CORS (Cross-Origin Resource Sharing)
+
+The server includes a configurable CORS middleware to restrict cross-origin API access to specific frontends. By default, no CORS headers are sent, preserving same-origin behavior for embedded frontend deployments.
+
+To enable cross-origin access, set the `CORS_ALLOWED_ORIGINS` environment variable:
+
+```bash
+CORS_ALLOWED_ORIGINS=https://repo-promoter.ondigitalocean.app,http://localhost:3000
+```
+
+When configured, the middleware:
+- Reflects the matched origin in `Access-Control-Allow-Origin` (never uses `*`).
+- Handles `OPTIONS` preflight requests automatically, responding with `204 No Content`.
+- Caches preflight responses for 24 hours via `Access-Control-Max-Age: 86400`.
+- Allows methods `GET`, `POST`, `OPTIONS` and the `Content-Type` header.
+- Sets `Vary: Origin` for correct cache behavior.
+
+When `CORS_ALLOWED_ORIGINS` is empty or unset, the middleware is a no-op — no CORS headers are added and behavior is unchanged from previous versions.
 
 ## Tech Stack
 

@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"repo-promoter-agent/internal/agent"
 	"repo-promoter-agent/internal/analytics"
+	"repo-promoter-agent/internal/cors"
 	"repo-promoter-agent/internal/github"
 	"repo-promoter-agent/internal/handler"
 	"repo-promoter-agent/internal/ratelimit"
@@ -85,6 +87,28 @@ func main() {
 	defer stopCleanup()
 	log.Printf("Rate limiter enabled: generate=%d/5m0s, search=%d/5m0s", generateMax, searchMax)
 
+	// Parse CORS configuration.
+	var allowedOrigins []string
+	if raw := os.Getenv("CORS_ALLOWED_ORIGINS"); raw != "" {
+		for _, o := range strings.Split(raw, ",") {
+			o = strings.TrimSpace(o)
+			if o != "" {
+				allowedOrigins = append(allowedOrigins, o)
+			}
+		}
+	}
+	corsCfg := cors.Config{
+		AllowedOrigins: allowedOrigins,
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type"},
+		MaxAge:         86400,
+	}
+	if len(allowedOrigins) > 0 {
+		log.Printf("CORS enabled for origins: %v", allowedOrigins)
+	} else {
+		log.Println("CORS not configured — same-origin only (set CORS_ALLOWED_ORIGINS to enable)")
+	}
+
 	// Create search analytics tracker.
 	tracker := analytics.NewTracker()
 
@@ -97,9 +121,12 @@ func main() {
 	mux.Handle("/api/analytics/popular", limiter.Middleware("search")(handler.NewPopularHandler(tracker)))
 	mux.Handle("/", noCacheHandler(http.FileServerFS(static.Files)))
 
+	var rootHandler http.Handler = mux
+	rootHandler = cors.Middleware(corsCfg)(rootHandler)
+
 	addr := ":" + port
 	log.Printf("Server listening on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, rootHandler); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
