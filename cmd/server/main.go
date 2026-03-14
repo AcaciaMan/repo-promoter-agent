@@ -33,17 +33,22 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "promotions.db"
+	solrURL := os.Getenv("SOLR_URL")
+	if solrURL == "" {
+		solrURL = "http://localhost:8983"
+	}
+	solrCore := os.Getenv("SOLR_CORE")
+	if solrCore == "" {
+		solrCore = "promotions"
 	}
 
 	// Create store.
-	st, err := store.New(dbPath)
+	st, err := store.New(solrURL, solrCore)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		log.Fatalf("Failed to connect to Solr: %v", err)
 	}
 	defer st.Close()
+	log.Printf("Connected to Solr at %s (core: %s)", solrURL, solrCore)
 
 	// Create clients.
 	agentClient := agent.NewClient(endpoint, accessKey)

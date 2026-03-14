@@ -27,7 +27,7 @@ Key features:
   - Style can be lightly adapted based on the requested target channel (e.g., `twitter`, `linkedin`, `general`).
 
 - Searchable content library  
-  - Generated content is stored in a local SQLite database with Full‑Text Search.  
+  - Generated content is stored in Apache Solr with enterprise-grade full‑text search.  
   - Users can later search promotions by text, tags, or channel and quickly find reusable pieces of copy.
 
 - Simple, focused UI  
@@ -55,7 +55,7 @@ Typical scenarios:
 
 - Core design:
   - AI agent spec and JSON schema are defined (GitHub Repo Promotion Agent on Gradient AI).
-  - High‑level architecture for frontend, Go backend, and SQLite + FTS storage is laid out.
+  - High‑level architecture for frontend, Go backend, and Apache Solr storage is laid out.
 - First version goals:
   - Single trusted user scenario (no complex auth).
   - Support for public repositories only.
@@ -69,5 +69,5 @@ Post‑hackathon, Repo Promoter Agent can be extended with multi‑user support 
 - Hackathon: DigitalOcean Gradient AI Hackathon.
 - Stack:
   - AI: DigitalOcean Gradient AI (LLM‑based agent).
-  - Backend: Go service integrating GitHub API, Gradient AI, and SQLite with FTS.
+  - Backend: Go service integrating GitHub API, Gradient AI, and Apache Solr.
   - Frontend: Simple HTML/CSS/JavaScript web UI.

@@ -84,6 +84,8 @@ The response is returned **unwrapped** (no `{"data": ..., "usage": ...}` envelop
 | `AGENT_ENDPOINT`   | yes      | Base URL of the Gradient agent (e.g., `https://xxxxx.agents.do-ai.run`) |
 | `AGENT_ACCESS_KEY` | yes      | Bearer token for the agent API                           |
 | `PORT`             | no       | HTTP server listen port. Default: `8080`                 |
+| `SOLR_URL`         | no       | Solr server URL. Default: `http://localhost:8983`        |
+| `SOLR_CORE`        | no       | Solr core name. Default: `promotions`                    |
 
 ### `.env.example` file
 

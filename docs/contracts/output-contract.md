@@ -52,7 +52,7 @@ This document defines the JSON structure the Gradient agent must return inside `
 ### Q1 — `repo_url` and `repo_name` echo-back
 **Decision:** Keep them in the output.
 
-Yes, they're redundant with the input — but they make the output self-contained. In Phase 2, each output record gets stored in SQLite. Having `repo_url` and `repo_name` already present means the stored record is immediately useful without joining back to the request. The agent copies them verbatim from the input, so hallucination risk is negligible. Cost: two trivial string fields.
+Yes, they're redundant with the input — but they make the output self-contained. In Phase 2, each output record gets stored in Solr. Having `repo_url` and `repo_name` already present means the stored record is immediately useful without joining back to the request. The agent copies them verbatim from the input, so hallucination risk is negligible. Cost: two trivial string fields.
 
 ### Q2 — `target_channel` vs always generating all channels
 **Decision:** Option (a) — always generate all channels.

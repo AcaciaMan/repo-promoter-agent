@@ -21,7 +21,7 @@ Core concept:
 - User provides a **public GitHub repository URL**.  
 - Backend fetches basic repository data (name, description, README content, and later stars/forks/other metrics).  
 - An **AI agent (hosted on DigitalOcean Gradient)** generates structured promotional content tailored to different channels (Twitter/X, LinkedIn, etc.).  
-- Generated content is stored in a local database (SQLite with Full‑Text Search) and exposed through a simple web UI where users can **search, browse, and reuse** promo material.
+- Generated content is stored in **Apache Solr** and exposed through a simple web UI where users can **search, browse, and reuse** promo material.
 
 ### Target users
 
@@ -52,7 +52,7 @@ Core concept:
    - Integrates with:
      - **GitHub API** to fetch repo name, description, and README from public repositories.  
      - **AI agent endpoint** (DigitalOcean Gradient) to generate promotional content.  
-     - **SQLite database with Full‑Text Search** to store and query generated content.
+     - **Apache Solr** to store and query generated content with full‑text search.
    - Exposes endpoints such as:
      - `POST /api/generate` – generate promotional content for a repo and store it.
      - `GET /api/search` – search generated content by text, tags, or channel.
@@ -62,13 +62,13 @@ Core concept:
    - Uses a general‑purpose, high‑quality LLM.  
    - Receives structured repo data and instructions, and returns strictly formatted JSON with promotional content.
 
-4. **Storage (SQLite + FTS)**  
-   - Local database file managed by the Go backend.  
-   - One main table or FTS virtual table for “promotions” containing:
+4. **Storage (Apache Solr)**  
+   - Solr 10 instance with a `promotions` core managed by the Go backend via HTTP/JSON.  
+   - Documents contain:
      - Repo metadata (URL, name, short description).  
      - Generated content (headline, summary, tweets, LinkedIn post, tags, call‑to‑action).  
-     - Timestamps and possibly simple channel metadata.  
-   - Full‑Text Search is used to implement `/search` over summaries, tags, and generated posts.
+     - Timestamps and channel metadata.  
+   - Solr full‑text search (edismax) is used to implement `/search` over summaries, tags, and generated posts.
 
 ***
 
@@ -126,7 +126,7 @@ The agent is instructed to:
    - Fetches repo details (name, description, README) from GitHub.  
    - Constructs input JSON and prompt for the AI agent.  
    - Calls the AI agent endpoint and receives JSON promotional content.  
-   - Stores the result in SQLite (including all text fields in an FTS‑enabled table).  
+   - Stores the result in Solr (all fields indexed for full‑text search).  
    - Returns the generated content to the frontend.  
 5. Frontend displays the content in cards/sections with “copy” buttons.
 
@@ -135,7 +135,7 @@ The agent is instructed to:
 1. User opens the “Search” page.  
 2. User enters a search query (e.g., “CLI tool”, “Go microservices”, or “testing helpers”).  
 3. Frontend calls `GET /api/search?query=...`.  
-4. Backend runs a Full‑Text Search query on the SQLite FTS table.  
+4. Backend runs a full‑text search query against Solr.  
 5. Matching promotions are returned and rendered as a list of cards showing:
    - Repo name and URL.  
    - Headline and short summary.  
@@ -159,7 +159,7 @@ The agent is instructed to:
 1. Get the **AI agent** working reliably with a stable JSON schema.  
 2. Implement the **Go backend** that:
    - Calls the agent.  
-   - Stores results in SQLite with FTS.  
+   - Stores results in Solr with full‑text search.  
 3. Build the **minimal frontend** for:
    - Generating content for a single repo.  
    - Searching previously generated content.  

@@ -54,7 +54,7 @@ Avoid:
 
 - Built for developers: assume the reader understands Git, repos, and basic tooling.
 - Helper, not replacement: “assists you with promo copy” rather than “does everything for you.”
-- Lightweight and hackable: simple Go backend, SQLite, and a straightforward UI; easy to run and extend.
+- Lightweight and hackable: simple Go backend, Apache Solr, and a straightforward UI; easy to run and extend.
 
 Example phrasing:
 
@@ -72,7 +72,7 @@ Example phrasing:
 - Social post (LinkedIn):  
   “I built Repo Promoter Agent for developers who are strong on code but short on time for promotion.  
   Paste a public GitHub repo URL, and an AI agent on DigitalOcean Gradient generates headlines, tweets, a LinkedIn‑style post, and tags.  
-  Everything is saved in a searchable SQLite library so you can reuse and refine your promo copy over time.”
+  Everything is saved in a searchable Solr library so you can reuse and refine your promo copy over time."
 
 - Documentation tone example:  
   “To get started, provide a public GitHub repository URL on the Generate page. The backend will fetch the repo metadata and README, send it to the Gradient AI agent, and return a promotion bundle. You can copy individual pieces of text or search for them later on the Search page.”

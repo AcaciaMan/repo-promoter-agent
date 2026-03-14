@@ -1,62 +1,16 @@
 package store
 
 import (
+	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
-
-const schema = `
-CREATE TABLE IF NOT EXISTS promotions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_url TEXT NOT NULL,
-    repo_name TEXT NOT NULL,
-    headline TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    key_benefits TEXT NOT NULL,
-    tags TEXT NOT NULL,
-    twitter_posts TEXT NOT NULL,
-    linkedin_post TEXT NOT NULL,
-    call_to_action TEXT NOT NULL,
-    target_channel TEXT NOT NULL DEFAULT '',
-    target_audience TEXT NOT NULL DEFAULT '',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS promotions_fts USING fts5(
-    repo_name,
-    headline,
-    summary,
-    tags,
-    linkedin_post,
-    call_to_action,
-    content=promotions,
-    content_rowid=id
-);
-
--- Triggers to keep FTS index in sync.
-CREATE TRIGGER IF NOT EXISTS promotions_ai AFTER INSERT ON promotions BEGIN
-    INSERT INTO promotions_fts(rowid, repo_name, headline, summary, tags, linkedin_post, call_to_action)
-    VALUES (new.id, new.repo_name, new.headline, new.summary, new.tags, new.linkedin_post, new.call_to_action);
-END;
-
-CREATE TRIGGER IF NOT EXISTS promotions_ad AFTER DELETE ON promotions BEGIN
-    INSERT INTO promotions_fts(promotions_fts, rowid, repo_name, headline, summary, tags, linkedin_post, call_to_action)
-    VALUES ('delete', old.id, old.repo_name, old.headline, old.summary, old.tags, old.linkedin_post, old.call_to_action);
-END;
-
-CREATE TRIGGER IF NOT EXISTS promotions_au AFTER UPDATE ON promotions BEGIN
-    INSERT INTO promotions_fts(promotions_fts, rowid, repo_name, headline, summary, tags, linkedin_post, call_to_action)
-    VALUES ('delete', old.id, old.repo_name, old.headline, old.summary, old.tags, old.linkedin_post, old.call_to_action);
-    INSERT INTO promotions_fts(rowid, repo_name, headline, summary, tags, linkedin_post, call_to_action)
-    VALUES (new.id, new.repo_name, new.headline, new.summary, new.tags, new.linkedin_post, new.call_to_action);
-END;
-`
 
 // Promotion represents a stored promotional content record.
 type Promotion struct {
@@ -80,216 +34,307 @@ type Promotion struct {
 	Views14dUnique  int             `json:"views_14d_unique"`
 	Clones14dTotal  int             `json:"clones_14d_total"`
 	Clones14dUnique int             `json:"clones_14d_unique"`
+	Readme          string          `json:"readme"`
 	AnalysisJSON    json.RawMessage `json:"analysis"`
 }
 
-// Store is a SQLite-backed store for promotional content.
+// Store is a Solr-backed store for promotional content.
 type Store struct {
-	db *sql.DB
+	baseURL string
+	core    string
+	client  *http.Client
 }
 
-// New opens (or creates) the SQLite database at dbPath and runs schema
-// migration. The database is ready to use immediately after this returns.
-func New(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+// New creates a Solr-backed store and pings the core to verify connectivity.
+func New(solrURL, core string) (*Store, error) {
+	s := &Store{
+		baseURL: strings.TrimRight(solrURL, "/"),
+		core:    core,
+		client:  &http.Client{Timeout: 30 * time.Second},
+	}
+
+	pingURL := fmt.Sprintf("%s/solr/%s/admin/ping", s.baseURL, s.core)
+	resp, err := s.client.Get(pingURL)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		return nil, fmt.Errorf("ping solr: %w", err)
 	}
-
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("initialize schema: %w", err)
-	}
-
-	s := &Store{db: db}
-	if err := s.applyMigrations(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("apply migrations: %w", err)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("solr ping returned status %d", resp.StatusCode)
 	}
 
 	return s, nil
 }
 
-func (s *Store) applyMigrations() error {
-	columns := []string{
-		"views_14d_total INTEGER NOT NULL DEFAULT 0",
-		"views_14d_unique INTEGER NOT NULL DEFAULT 0",
-		"clones_14d_total INTEGER NOT NULL DEFAULT 0",
-		"clones_14d_unique INTEGER NOT NULL DEFAULT 0",
-		"analysis_json TEXT DEFAULT NULL",
-		"stars INTEGER NOT NULL DEFAULT 0",
-		"forks INTEGER NOT NULL DEFAULT 0",
-		"watchers INTEGER NOT NULL DEFAULT 0",
-	}
-	for _, col := range columns {
-		_, err := s.db.Exec("ALTER TABLE promotions ADD COLUMN " + col)
-		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-	}
-	return nil
-}
-
-// Close closes the underlying database connection.
+// Close is a no-op — the HTTP client is stateless.
 func (s *Store) Close() error {
-	return s.db.Close()
-}
-
-// Save inserts a new promotion into the database. If a promotion for the same
-// repo_url already exists, the old record is deleted first. On success it sets
-// p.ID and p.CreatedAt from the inserted row.
-func (s *Store) Save(ctx context.Context, p *Promotion) error {
-	benefits, err := marshalJSON(p.KeyBenefits)
-	if err != nil {
-		return fmt.Errorf("marshal key_benefits: %w", err)
-	}
-	tags, err := marshalJSON(p.Tags)
-	if err != nil {
-		return fmt.Errorf("marshal tags: %w", err)
-	}
-	tweets, err := marshalJSON(p.TwitterPosts)
-	if err != nil {
-		return fmt.Errorf("marshal twitter_posts: %w", err)
-	}
-
-	// Delete any existing promotion for the same repo URL.
-	const delQ = `DELETE FROM promotions WHERE repo_url = ?`
-	if _, err := s.db.ExecContext(ctx, delQ, p.RepoURL); err != nil {
-		return fmt.Errorf("delete old promotion: %w", err)
-	}
-
-	const q = `INSERT INTO promotions
-		(repo_url, repo_name, headline, summary, key_benefits, tags, twitter_posts,
-		 linkedin_post, call_to_action, target_channel, target_audience,
-		 stars, forks, watchers,
-		 views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
-		 analysis_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at`
-
-	var analysisVal interface{}
-	if p.AnalysisJSON != nil {
-		analysisVal = string(p.AnalysisJSON)
-	}
-
-	var createdAt string
-	err = s.db.QueryRowContext(ctx, q,
-		p.RepoURL, p.RepoName, p.Headline, p.Summary,
-		benefits, tags, tweets,
-		p.LinkedInPost, p.CallToAction,
-		p.TargetChannel, p.TargetAudience,
-		p.Stars, p.Forks, p.Watchers,
-		p.Views14dTotal, p.Views14dUnique, p.Clones14dTotal, p.Clones14dUnique,
-		analysisVal,
-	).Scan(&p.ID, &createdAt)
-	if err != nil {
-		return fmt.Errorf("insert promotion: %w", err)
-	}
-
-	p.CreatedAt = parseTime(createdAt)
 	return nil
 }
 
-// Search performs a full-text search across promotions and returns matching
-// results ordered by relevance. If limit is 0 it defaults to 20.
+// Save upserts a Promotion document into Solr. The document's unique key is
+// the repo_url value. On success it sets p.CreatedAt.
+func (s *Store) Save(ctx context.Context, p *Promotion) error {
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now()
+	}
+
+	doc := map[string]interface{}{
+		"id":                p.RepoURL,
+		"repo_url":          p.RepoURL,
+		"repo_name":         p.RepoName,
+		"headline":          p.Headline,
+		"summary":           p.Summary,
+		"key_benefits":      orEmptySlice(p.KeyBenefits),
+		"tags":              orEmptySlice(p.Tags),
+		"twitter_posts":     orEmptySlice(p.TwitterPosts),
+		"linkedin_post":     p.LinkedInPost,
+		"call_to_action":    p.CallToAction,
+		"target_channel":    p.TargetChannel,
+		"target_audience":   p.TargetAudience,
+		"created_at":        p.CreatedAt.UTC().Format(time.RFC3339),
+		"stars":             p.Stars,
+		"forks":             p.Forks,
+		"watchers":          p.Watchers,
+		"views_14d_total":   p.Views14dTotal,
+		"views_14d_unique":  p.Views14dUnique,
+		"clones_14d_total":  p.Clones14dTotal,
+		"clones_14d_unique": p.Clones14dUnique,
+		"readme":            p.Readme,
+	}
+
+	if p.AnalysisJSON != nil {
+		doc["analysis_json"] = string(p.AnalysisJSON)
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal document: %w", err)
+	}
+
+	updateURL := fmt.Sprintf("%s/solr/%s/update/json/docs?commit=true", s.baseURL, s.core)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, updateURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post to solr: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read solr response: %w", err)
+	}
+
+	var solrResp struct {
+		ResponseHeader struct {
+			Status int `json:"status"`
+		} `json:"responseHeader"`
+	}
+	if err := json.Unmarshal(respBody, &solrResp); err != nil {
+		return fmt.Errorf("parse solr response: %w", err)
+	}
+	if solrResp.ResponseHeader.Status != 0 {
+		return fmt.Errorf("solr update error: status %d, body: %s", solrResp.ResponseHeader.Status, string(respBody))
+	}
+
+	p.ID = 0
+	return nil
+}
+
+// Search performs a full-text search across promotions using edismax and
+// returns matching results ordered by relevance.
 func (s *Store) Search(ctx context.Context, query string, limit int) ([]Promotion, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 
-	ftsQuery := sanitizeFTSQuery(query)
-	if ftsQuery == "" {
+	q := strings.TrimSpace(query)
+	if q == "" {
 		return []Promotion{}, nil
 	}
+	q = sanitizeSolrQuery(q)
 
-	const q = `SELECT p.id, p.repo_url, p.repo_name, p.headline, p.summary,
-		p.key_benefits, p.tags, p.twitter_posts, p.linkedin_post,
-		p.call_to_action, p.target_channel, p.target_audience, p.created_at,
-		p.stars, p.forks, p.watchers,
-		p.views_14d_total, p.views_14d_unique, p.clones_14d_total, p.clones_14d_unique,
-		p.analysis_json
-		FROM promotions_fts fts
-		JOIN promotions p ON p.id = fts.rowid
-		WHERE promotions_fts MATCH ?
-		ORDER BY rank
-		LIMIT ?`
-
-	rows, err := s.db.QueryContext(ctx, q, ftsQuery, limit)
-	if err != nil {
-		return nil, fmt.Errorf("search promotions: %w", err)
+	params := url.Values{
+		"q":       {q},
+		"defType": {"edismax"},
+		"qf":      {"repo_name headline summary key_benefits tags twitter_posts linkedin_post call_to_action target_audience readme"},
+		"rows":    {fmt.Sprintf("%d", limit)},
+		"sort":    {"score desc"},
+		"wt":      {"json"},
+		"fl":      {"*"},
 	}
-	defer rows.Close()
 
-	return scanPromotions(rows)
+	selectURL := fmt.Sprintf("%s/solr/%s/select?%s", s.baseURL, s.core, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, selectURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create search request: %w", err)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search solr: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read search response: %w", err)
+	}
+
+	return parseSolrDocs(body)
 }
 
 // List returns the most recent promotions ordered by created_at descending.
-// If limit is 0 it defaults to 20.
 func (s *Store) List(ctx context.Context, limit int) ([]Promotion, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 
-	const q = `SELECT id, repo_url, repo_name, headline, summary,
-		key_benefits, tags, twitter_posts, linkedin_post,
-		call_to_action, target_channel, target_audience, created_at,
-		stars, forks, watchers,
-		views_14d_total, views_14d_unique, clones_14d_total, clones_14d_unique,
-		analysis_json
-		FROM promotions
-		ORDER BY created_at DESC
-		LIMIT ?`
-
-	rows, err := s.db.QueryContext(ctx, q, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list promotions: %w", err)
+	params := url.Values{
+		"q":    {"*:*"},
+		"rows": {fmt.Sprintf("%d", limit)},
+		"sort": {"created_at desc"},
+		"wt":   {"json"},
+		"fl":   {"*"},
 	}
-	defer rows.Close()
 
-	return scanPromotions(rows)
+	selectURL := fmt.Sprintf("%s/solr/%s/select?%s", s.baseURL, s.core, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, selectURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create list request: %w", err)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list from solr: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read list response: %w", err)
+	}
+
+	return parseSolrDocs(body)
 }
 
 // --- helpers ---
 
-func scanPromotions(rows *sql.Rows) ([]Promotion, error) {
-	var result []Promotion
-	for rows.Next() {
-		var p Promotion
-		var benefits, tags, tweets, createdAt string
-		var analysisJSON sql.NullString
-		if err := rows.Scan(
-			&p.ID, &p.RepoURL, &p.RepoName, &p.Headline, &p.Summary,
-			&benefits, &tags, &tweets, &p.LinkedInPost,
-			&p.CallToAction, &p.TargetChannel, &p.TargetAudience, &createdAt,
-			&p.Stars, &p.Forks, &p.Watchers,
-			&p.Views14dTotal, &p.Views14dUnique, &p.Clones14dTotal, &p.Clones14dUnique,
-			&analysisJSON,
-		); err != nil {
-			return nil, fmt.Errorf("scan promotion: %w", err)
+// parseSolrDocs extracts Promotion records from a Solr select JSON response.
+func parseSolrDocs(body []byte) ([]Promotion, error) {
+	var envelope struct {
+		Response struct {
+			Docs []map[string]interface{} `json:"docs"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("parse solr response: %w", err)
+	}
+
+	result := make([]Promotion, 0, len(envelope.Response.Docs))
+	for _, doc := range envelope.Response.Docs {
+		p := Promotion{
+			ID:              0,
+			RepoURL:         getString(doc, "repo_url"),
+			RepoName:        getString(doc, "repo_name"),
+			Headline:        getString(doc, "headline"),
+			Summary:         getString(doc, "summary"),
+			KeyBenefits:     getStringSlice(doc, "key_benefits"),
+			Tags:            getStringSlice(doc, "tags"),
+			TwitterPosts:    getStringSlice(doc, "twitter_posts"),
+			LinkedInPost:    getString(doc, "linkedin_post"),
+			CallToAction:    getString(doc, "call_to_action"),
+			TargetChannel:   getString(doc, "target_channel"),
+			TargetAudience:  getString(doc, "target_audience"),
+			Stars:           getInt(doc, "stars"),
+			Forks:           getInt(doc, "forks"),
+			Watchers:        getInt(doc, "watchers"),
+			Views14dTotal:   getInt(doc, "views_14d_total"),
+			Views14dUnique:  getInt(doc, "views_14d_unique"),
+			Clones14dTotal:  getInt(doc, "clones_14d_total"),
+			Clones14dUnique: getInt(doc, "clones_14d_unique"),
+			Readme:          getString(doc, "readme"),
 		}
-		p.KeyBenefits = unmarshalJSONOrEmpty(benefits)
-		p.Tags = unmarshalJSONOrEmpty(tags)
-		p.TwitterPosts = unmarshalJSONOrEmpty(tweets)
-		p.CreatedAt = parseTime(createdAt)
-		if analysisJSON.Valid {
-			p.AnalysisJSON = json.RawMessage(analysisJSON.String)
+
+		if s := getString(doc, "created_at"); s != "" {
+			p.CreatedAt = parseTime(s)
 		}
+
+		if s := getString(doc, "analysis_json"); s != "" {
+			p.AnalysisJSON = json.RawMessage(s)
+		}
+
 		result = append(result, p)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate promotions: %w", err)
-	}
-	if result == nil {
-		result = []Promotion{}
-	}
 	return result, nil
+}
+
+func getString(doc map[string]interface{}, key string) string {
+	v, ok := doc[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []interface{}:
+		if len(val) > 0 {
+			if s, ok := val[0].(string); ok {
+				return s
+			}
+		}
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func getStringSlice(doc map[string]interface{}, key string) []string {
+	v, ok := doc[key]
+	if !ok || v == nil {
+		return []string{}
+	}
+	switch val := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(val))
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			} else {
+				out = append(out, fmt.Sprintf("%v", item))
+			}
+		}
+		return out
+	case string:
+		return []string{val}
+	}
+	return []string{}
+}
+
+func getInt(doc map[string]interface{}, key string) int {
+	v, ok := doc[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
+		return int(val)
+	}
+	return 0
 }
 
 func parseTime(s string) time.Time {
 	for _, layout := range []string{
 		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000Z",
 		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
@@ -298,41 +343,39 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
-func marshalJSON(v []string) (string, error) {
-	if v == nil {
-		v = []string{}
-	}
-	b, err := json.Marshal(v)
-	return string(b), err
-}
-
-func unmarshalJSONOrEmpty(s string) []string {
-	var v []string
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
+func orEmptySlice(s []string) []string {
+	if s == nil {
 		return []string{}
 	}
-	return v
+	return s
 }
 
-// sanitizeFTSQuery wraps each whitespace-separated token in double quotes to
-// prevent FTS5 syntax errors from user input.
-func sanitizeFTSQuery(query string) string {
-	// Strip characters that are special in FTS5 even inside quotes.
+// sanitizeSolrQuery escapes Solr special characters in a user query.
+func sanitizeSolrQuery(query string) string {
 	replacer := strings.NewReplacer(
-		"\"", "",
-		"*", "",
-		"(", "",
-		")", "",
-		":", "",
-		"^", "",
+		`\`, `\\`,
+		`+`, `\+`,
+		`-`, `\-`,
+		`!`, `\!`,
+		`(`, `\(`,
+		`)`, `\)`,
+		`{`, `\{`,
+		`}`, `\}`,
+		`[`, `\[`,
+		`]`, `\]`,
+		`^`, `\^`,
+		`"`, `\"`,
+		`~`, `\~`,
+		`*`, `\*`,
+		`?`, `\?`,
+		`:`, `\:`,
+		`/`, `\/`,
 	)
-	cleaned := replacer.Replace(query)
+	escaped := replacer.Replace(query)
 
-	var tokens []string
-	for _, t := range strings.Fields(cleaned) {
-		if t != "" {
-			tokens = append(tokens, "\""+t+"\"")
-		}
-	}
-	return strings.Join(tokens, " ")
+	// Also escape && and || sequences
+	escaped = strings.ReplaceAll(escaped, `\&\&`, `\&&`)
+	escaped = strings.ReplaceAll(escaped, `\|\|`, `\||`)
+
+	return escaped
 }

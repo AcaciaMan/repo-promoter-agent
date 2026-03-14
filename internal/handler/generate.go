@@ -160,6 +160,7 @@ func (h *GenerateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	promo.Clones14dTotal = trafficMetrics.Clones14dTotal
 	promo.Clones14dUnique = trafficMetrics.Clones14dUnique
 	promo.AnalysisJSON = analysisJSON
+	promo.Readme = input.ReadmeSummary
 
 	// Store (best-effort — never fail the request because of a DB error).
 	if err := h.store.Save(r.Context(), &promo); err != nil {

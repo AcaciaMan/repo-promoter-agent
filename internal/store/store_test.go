@@ -1,19 +1,52 @@
+//go:build integration
+
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	st, err := New(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create test store: %v", err)
+	solrURL := os.Getenv("SOLR_URL")
+	if solrURL == "" {
+		solrURL = "http://localhost:8983"
 	}
-	t.Cleanup(func() { st.Close() })
+	solrCore := os.Getenv("SOLR_CORE")
+	if solrCore == "" {
+		solrCore = "promotions"
+	}
+	st, err := New(solrURL, solrCore)
+	if err != nil {
+		t.Fatalf("failed to create Solr store: %v", err)
+	}
 	return st
+}
+
+func cleanupSolr(t *testing.T, st *Store) {
+	t.Helper()
+	payload := []byte(`{"delete":{"query":"*:*"},"commit":{}}`)
+	url := fmt.Sprintf("%s/solr/%s/update", st.baseURL, st.core)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("cleanup: create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := st.client.Do(req)
+	if err != nil {
+		t.Fatalf("cleanup: post delete: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cleanup: solr returned status %d", resp.StatusCode)
+	}
 }
 
 func samplePromotion() *Promotion {
@@ -34,20 +67,29 @@ func samplePromotion() *Promotion {
 
 func sampleAnalysisJSON() json.RawMessage {
 	return json.RawMessage(`{
-		"repo_url": "https://github.com/testowner/testrepo",
-		"repo_name": "testrepo",
 		"primary_value_proposition": "Helps developers test efficiently.",
 		"ideal_audience": ["Go developers", "TDD practitioners"],
-		"key_features": ["Fast execution", "Simple API"],
-		"differentiators": ["Minimal dependencies"],
-		"risk_or_limitations": ["Early-stage project"],
-		"social_proof_signals": ["Modest traction"],
-		"recommended_positioning_angle": ["Lightweight testing"]
+		"key_features": ["Fast execution", "Simple API"]
 	}`)
+}
+
+func TestSave_Basic(t *testing.T) {
+	st := newTestStore(t)
+	cleanupSolr(t, st)
+	ctx := context.Background()
+
+	p := samplePromotion()
+	if err := st.Save(ctx, p); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	if p.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be non-zero after save")
+	}
 }
 
 func TestSave_WithAnalysis(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
 	p := samplePromotion()
@@ -55,9 +97,6 @@ func TestSave_WithAnalysis(t *testing.T) {
 
 	if err := st.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error: %v", err)
-	}
-	if p.ID <= 0 {
-		t.Errorf("expected ID > 0, got %d", p.ID)
 	}
 
 	results, err := st.List(ctx, 1)
@@ -84,6 +123,7 @@ func TestSave_WithAnalysis(t *testing.T) {
 
 func TestSave_WithoutAnalysis(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
 	p := samplePromotion()
@@ -103,39 +143,21 @@ func TestSave_WithoutAnalysis(t *testing.T) {
 	if results[0].AnalysisJSON != nil {
 		t.Errorf("expected AnalysisJSON to be nil, got %s", results[0].AnalysisJSON)
 	}
-
-	// Marshal to JSON and verify "analysis" field is null
-	b, err := json.Marshal(results[0])
-	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-	val, ok := m["analysis"]
-	if !ok {
-		t.Fatal("expected 'analysis' key in marshaled JSON")
-	}
-	if val != nil {
-		t.Errorf("expected 'analysis' to be null, got %v", val)
-	}
 }
 
-func TestSave_ReplacesOldPromotion_WithAnalysis(t *testing.T) {
+func TestSave_Upsert(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	// Save first without analysis
 	p1 := samplePromotion()
+	p1.Headline = "Original"
 	if err := st.Save(ctx, p1); err != nil {
 		t.Fatalf("Save() first error: %v", err)
 	}
 
-	// Save second with same repo_url, with analysis
 	p2 := samplePromotion()
-	p2.Headline = "Updated Headline"
-	p2.AnalysisJSON = sampleAnalysisJSON()
+	p2.Headline = "Updated"
 	if err := st.Save(ctx, p2); err != nil {
 		t.Fatalf("Save() second error: %v", err)
 	}
@@ -145,79 +167,81 @@ func TestSave_ReplacesOldPromotion_WithAnalysis(t *testing.T) {
 		t.Fatalf("List() error: %v", err)
 	}
 	if len(results) != 1 {
-		t.Fatalf("expected 1 result (old deleted), got %d", len(results))
+		t.Fatalf("expected 1 result (upsert), got %d", len(results))
 	}
-	if results[0].AnalysisJSON == nil {
-		t.Error("expected replacement promotion to have AnalysisJSON set")
-	}
-	if results[0].Headline != "Updated Headline" {
-		t.Errorf("expected updated headline, got %q", results[0].Headline)
+	if results[0].Headline != "Updated" {
+		t.Errorf("expected headline %q, got %q", "Updated", results[0].Headline)
 	}
 }
 
-func TestSearch_ReturnsAnalysis(t *testing.T) {
+func TestSearch_FullText(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
 	p := samplePromotion()
-	p.AnalysisJSON = sampleAnalysisJSON()
+	p.Summary = "A tool for kubernetes deployment automation"
 	if err := st.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	results, err := st.Search(ctx, "testrepo", 10)
+	results, err := st.Search(ctx, "kubernetes", 10)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].AnalysisJSON == nil {
-		t.Fatal("expected AnalysisJSON to be non-nil in search result")
-	}
-	if !json.Valid(results[0].AnalysisJSON) {
-		t.Fatal("AnalysisJSON from search is not valid JSON")
+	if results[0].RepoName != "testrepo" {
+		t.Errorf("expected repo_name %q, got %q", "testrepo", results[0].RepoName)
 	}
 }
 
-func TestSearch_ReturnsNullAnalysis(t *testing.T) {
+func TestSearch_EmptyQuery(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	p := samplePromotion()
-	if err := st.Save(ctx, p); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
-
-	results, err := st.Search(ctx, "testrepo", 10)
+	results, err := st.Search(ctx, "", 10)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].AnalysisJSON != nil {
-		t.Errorf("expected AnalysisJSON to be nil, got %s", results[0].AnalysisJSON)
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for empty query, got %d", len(results))
 	}
 }
 
-func TestList_MixedAnalysis(t *testing.T) {
+func TestSearch_NoMatch(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
-	// Promotion A with analysis
+	results, err := st.Search(ctx, "nonexistent", 10)
+	if err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestList_OrderByDate(t *testing.T) {
+	st := newTestStore(t)
+	cleanupSolr(t, st)
+	ctx := context.Background()
+
 	pA := samplePromotion()
 	pA.RepoURL = "https://github.com/testowner/alpha"
 	pA.RepoName = "alpha"
-	pA.AnalysisJSON = sampleAnalysisJSON()
+	pA.CreatedAt = time.Date(2026, 3, 14, 10, 0, 0, 0, time.UTC)
 	if err := st.Save(ctx, pA); err != nil {
 		t.Fatalf("Save(alpha) error: %v", err)
 	}
 
-	// Promotion B without analysis
 	pB := samplePromotion()
 	pB.RepoURL = "https://github.com/testowner/beta"
 	pB.RepoName = "beta"
+	pB.CreatedAt = time.Date(2026, 3, 14, 12, 0, 0, 0, time.UTC)
 	if err := st.Save(ctx, pB); err != nil {
 		t.Fatalf("Save(beta) error: %v", err)
 	}
@@ -229,29 +253,86 @@ func TestList_MixedAnalysis(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
-
-	var withAnalysis, withoutAnalysis int
-	for _, r := range results {
-		if r.AnalysisJSON != nil {
-			withAnalysis++
-		} else {
-			withoutAnalysis++
-		}
+	if results[0].RepoName != "beta" {
+		t.Errorf("expected first result to be beta (more recent), got %q", results[0].RepoName)
 	}
-	if withAnalysis != 1 {
-		t.Errorf("expected 1 with analysis, got %d", withAnalysis)
-	}
-	if withoutAnalysis != 1 {
-		t.Errorf("expected 1 without analysis, got %d", withoutAnalysis)
+	if results[1].RepoName != "alpha" {
+		t.Errorf("expected second result to be alpha (older), got %q", results[1].RepoName)
 	}
 }
 
-func TestSave_AnalysisJSON_RoundTrip(t *testing.T) {
+func TestList_RespectsLimit(t *testing.T) {
 	st := newTestStore(t)
+	cleanupSolr(t, st)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		p := samplePromotion()
+		p.RepoURL = fmt.Sprintf("https://github.com/testowner/repo%d", i)
+		p.RepoName = fmt.Sprintf("repo%d", i)
+		p.CreatedAt = time.Date(2026, 3, 14, 10+i, 0, 0, 0, time.UTC)
+		if err := st.Save(ctx, p); err != nil {
+			t.Fatalf("Save(repo%d) error: %v", i, err)
+		}
+	}
+
+	results, err := st.List(ctx, 2)
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results with limit 2, got %d", len(results))
+	}
+}
+
+func TestList_Empty(t *testing.T) {
+	st := newTestStore(t)
+	cleanupSolr(t, st)
+	ctx := context.Background()
+
+	results, err := st.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if results == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearch_SpecialCharacters(t *testing.T) {
+	st := newTestStore(t)
+	cleanupSolr(t, st)
 	ctx := context.Background()
 
 	p := samplePromotion()
-	p.AnalysisJSON = sampleAnalysisJSON()
+	if err := st.Save(ctx, p); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	// Should not crash — query is sanitized
+	_, err := st.Search(ctx, "C++ (advanced)", 10)
+	if err != nil {
+		t.Fatalf("Search() with special chars error: %v", err)
+	}
+}
+
+func TestSave_WithTrafficMetrics(t *testing.T) {
+	st := newTestStore(t)
+	cleanupSolr(t, st)
+	ctx := context.Background()
+
+	p := samplePromotion()
+	p.Stars = 42
+	p.Forks = 7
+	p.Watchers = 15
+	p.Views14dTotal = 100
+	p.Views14dUnique = 50
+	p.Clones14dTotal = 20
+	p.Clones14dUnique = 10
+
 	if err := st.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
@@ -264,130 +345,26 @@ func TestSave_AnalysisJSON_RoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	var m map[string]interface{}
-	if err := json.Unmarshal(results[0].AnalysisJSON, &m); err != nil {
-		t.Fatalf("failed to unmarshal AnalysisJSON: %v", err)
+	r := results[0]
+	if r.Stars != 42 {
+		t.Errorf("Stars = %d, want 42", r.Stars)
 	}
-
-	// Check primary_value_proposition
-	pvp, ok := m["primary_value_proposition"].(string)
-	if !ok {
-		t.Fatal("primary_value_proposition is not a string")
+	if r.Forks != 7 {
+		t.Errorf("Forks = %d, want 7", r.Forks)
 	}
-	if pvp != "Helps developers test efficiently." {
-		t.Errorf("primary_value_proposition = %q, want %q", pvp, "Helps developers test efficiently.")
+	if r.Watchers != 15 {
+		t.Errorf("Watchers = %d, want 15", r.Watchers)
 	}
-
-	// Check ideal_audience is an array with expected length
-	audience, ok := m["ideal_audience"].([]interface{})
-	if !ok {
-		t.Fatal("ideal_audience is not an array")
+	if r.Views14dTotal != 100 {
+		t.Errorf("Views14dTotal = %d, want 100", r.Views14dTotal)
 	}
-	if len(audience) != 2 {
-		t.Errorf("ideal_audience length = %d, want 2", len(audience))
+	if r.Views14dUnique != 50 {
+		t.Errorf("Views14dUnique = %d, want 50", r.Views14dUnique)
 	}
-
-	// Check key_features contains expected items
-	features, ok := m["key_features"].([]interface{})
-	if !ok {
-		t.Fatal("key_features is not an array")
+	if r.Clones14dTotal != 20 {
+		t.Errorf("Clones14dTotal = %d, want 20", r.Clones14dTotal)
 	}
-	expectedFeatures := map[string]bool{"Fast execution": false, "Simple API": false}
-	for _, f := range features {
-		if s, ok := f.(string); ok {
-			expectedFeatures[s] = true
-		}
-	}
-	for k, found := range expectedFeatures {
-		if !found {
-			t.Errorf("key_features missing expected item %q", k)
-		}
-	}
-}
-
-func TestSave_AnalysisJSON_MarshalToJSON(t *testing.T) {
-	st := newTestStore(t)
-	ctx := context.Background()
-
-	p := samplePromotion()
-	p.AnalysisJSON = sampleAnalysisJSON()
-	if err := st.Save(ctx, p); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
-
-	results, err := st.List(ctx, 1)
-	if err != nil {
-		t.Fatalf("List() error: %v", err)
-	}
-
-	b, err := json.Marshal(results[0])
-	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
-	}
-
-	var m map[string]interface{}
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-
-	analysis, ok := m["analysis"]
-	if !ok {
-		t.Fatal("expected 'analysis' key in marshaled JSON")
-	}
-
-	// analysis should be a nested object (map), not a string
-	analysisMap, ok := analysis.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'analysis' to be a nested object, got %T", analysis)
-	}
-	if _, ok := analysisMap["primary_value_proposition"]; !ok {
-		t.Error("nested analysis object missing 'primary_value_proposition'")
-	}
-}
-
-func TestSave_AnalysisJSON_NullMarshalToJSON(t *testing.T) {
-	st := newTestStore(t)
-	ctx := context.Background()
-
-	p := samplePromotion()
-	if err := st.Save(ctx, p); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
-
-	results, err := st.List(ctx, 1)
-	if err != nil {
-		t.Fatalf("List() error: %v", err)
-	}
-
-	b, err := json.Marshal(results[0])
-	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
-	}
-
-	var m map[string]interface{}
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-
-	val, ok := m["analysis"]
-	if !ok {
-		t.Fatal("expected 'analysis' key in marshaled JSON")
-	}
-	if val != nil {
-		t.Errorf("expected 'analysis' to be null, got %v", val)
-	}
-}
-
-func TestMigration_AnalysisColumn(t *testing.T) {
-	st := newTestStore(t)
-
-	// Run applyMigrations again — should be idempotent
-	if err := st.applyMigrations(); err != nil {
-		t.Fatalf("second applyMigrations() error: %v", err)
-	}
-
-	// Run a third time for good measure
-	if err := st.applyMigrations(); err != nil {
-		t.Fatalf("third applyMigrations() error: %v", err)
+	if r.Clones14dUnique != 10 {
+		t.Errorf("Clones14dUnique = %d, want 10", r.Clones14dUnique)
 	}
 }

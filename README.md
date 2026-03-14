@@ -7,9 +7,9 @@ AI-powered GitHub repository promoter: paste a repo URL and get searchable, AI-g
 - **AI-generated promotional content** — Generates headlines, summaries, key benefits, tags, Twitter posts, LinkedIn posts, and calls-to-action for any public GitHub repo
 - **GitHub repo metadata extraction** — Automatically fetches repo name, description, language, topics, stars, forks, and README from the GitHub API
 - **GitHub traffic metrics** — Optionally fetches 14-day views and clones for AcaciaMan repositories, displays them in the UI, and uses them to influence AI-generated promotional tone
-- **Full-text search** — SQLite FTS5-powered search across all generated promotions
+- **Full-text search** — Solr full-text search across all generated promotions
 - **Single-page web UI** — Generate promotions and browse/search past results from a polished HTML frontend
-- **Persistent storage** — All generated content is saved to a local SQLite database
+- **Persistent storage** — All generated content is saved to Apache Solr
 - **Single binary** — Static assets embedded into the Go binary via `go:embed`
 
 ## Architecture
@@ -27,8 +27,8 @@ AI-powered GitHub repository promoter: paste a repo URL and get searchable, AI-g
                     └──────┬───────┘
                            │
                     ┌──────┴───────┐
-                    │   SQLite DB  │
-                    │ (FTS5 search)│
+                    │  Apache Solr │
+                    │ (full-text)  │
                     └──────────────┘
 ```
 
@@ -90,7 +90,7 @@ internal/agent/client.go    — AI agent API client (prompt template, response p
 internal/github/client.go   — GitHub API client (repo metadata + README fetching)
 internal/handler/generate.go — POST /api/generate handler
 internal/handler/search.go  — GET /api/search handler
-internal/store/store.go     — SQLite storage with FTS5 full-text search
+internal/store/store.go     — Solr-backed store for promotional content
 static/index.html           — Single-page frontend UI
 static/embed.go             — go:embed for static assets
 internal/ratelimit/ratelimit.go  — In-memory per-client rate limiter
@@ -111,12 +111,31 @@ internal/ratelimit/clientkey.go  — Client IP extraction (X-Forwarded-For aware
 | `AGENT_ENDPOINT`   | Yes      | —                | URL of the AI agent service        |
 | `AGENT_ACCESS_KEY` | Yes      | —                | API key for agent authentication   |
 | `PORT`             | No       | `8080`           | HTTP server port                   |
-| `DB_PATH`          | No       | `promotions.db`  | SQLite database file path          |
+| `SOLR_URL`         | No       | `http://localhost:8983` | Solr server URL             |
+| `SOLR_CORE`        | No       | `promotions`     | Solr core name                     |
 | `GITHUB_TOKEN`     | No       | —                | GitHub PAT for traffic metrics (views/clones) on AcaciaMan repos         |
 | `ANALYSIS_AGENT_ENDPOINT` | No | —             | URL of the Analysis Agent service (enables repo analysis) |
 | `ANALYSIS_AGENT_ACCESS_KEY` | No | —            | API key for the Analysis Agent                            |
 | `RATE_LIMIT_GENERATE_MAX` | No | `5`            | Max generate requests per client per 5-min window         |
 | `RATE_LIMIT_SEARCH_MAX`   | No | `100`          | Max search requests per client per 5-min window           |
+
+### Solr Setup (Local Development)
+
+The application requires Apache Solr 10 running locally.
+
+#### Prerequisites
+- Java 21 (e.g., Eclipse Temurin or Microsoft Build of OpenJDK)
+- Apache Solr 10 ([download](https://solr.apache.org/downloads.html))
+
+#### Quick Start
+1. Start Solr: `bin\solr.cmd start`
+2. Create the core: `bin\solr.cmd create -c promotions`
+3. Apply the schema — see `docs/prompts/55-solr-schema-definition.md` for the full Schema API commands.
+4. Set environment variables (or add to `.env`):
+   ```
+   SOLR_URL=http://localhost:8983
+   SOLR_CORE=promotions
+   ```
 
 ### Run
 
@@ -141,7 +160,7 @@ The app can optionally fetch GitHub **traffic metrics** (14-day views and clones
    - `GET /repos/{owner}/{repo}/traffic/views`
    - `GET /repos/{owner}/{repo}/traffic/clones`
 2. The metrics (total/unique views and clones over the last 14 days) are:
-   - **Stored** alongside the promotion in the SQLite database.
+   - **Stored** alongside the promotion in Solr.
    - **Displayed** in the web UI on both generate results and search cards.
    - **Sent to the AI agent** as context, subtly influencing the promotional tone (e.g., "gaining traction" for repos with active traffic).
 
@@ -224,7 +243,6 @@ Behind a reverse proxy (like DigitalOcean App Platform), the limiter uses the `X
 ## Tech Stack
 
 - **Go** — HTTP server, agent client, GitHub client
-- **SQLite (modernc.org/sqlite)** — Pure-Go SQLite driver, no CGO required
-- **FTS5** — Full-text search virtual table with auto-sync triggers
+- **Apache Solr 10** — Enterprise-grade full-text search and data store
 - **go:embed** — Static asset embedding
 - **godotenv** — `.env` file loading
