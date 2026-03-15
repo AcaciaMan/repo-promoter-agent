@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -240,22 +241,31 @@ func (s *Store) Search(ctx context.Context, query string, limit int, opts Search
 	applyFilters(params, opts)
 
 	selectURL := fmt.Sprintf("%s/solr/%s/select?%s", s.baseURL, s.core, params.Encode())
+	log.Printf("[search-debug] Solr search URL: %s", selectURL)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, selectURL, nil)
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("create search request: %w", err)
 	}
 
+	solrStart := time.Now()
 	resp, err := s.client.Do(req)
+	solrElapsed := time.Since(solrStart)
 	if err != nil {
+		log.Printf("[search-debug] Solr request failed after %s: %v", solrElapsed, err)
 		return SearchResult{}, fmt.Errorf("search solr: %w", err)
 	}
 	defer resp.Body.Close()
+	log.Printf("[search-debug] Solr responded HTTP %d in %s", resp.StatusCode, solrElapsed)
 
+	readStart := time.Now()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("read search response: %w", err)
 	}
+	log.Printf("[search-debug] Read %d bytes in %s", len(body), time.Since(readStart))
 
+	parseStart := time.Now()
 	docs, err := parseSolrDocs(body)
 	if err != nil {
 		return SearchResult{}, err
@@ -263,6 +273,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int, opts Search
 	facets := parseFacets(body)
 	highlights := parseHighlights(body)
 	collation := parseCollation(body)
+	log.Printf("[search-debug] Parsed %d docs in %s", len(docs), time.Since(parseStart))
 	return SearchResult{Results: docs, Facets: facets, Highlights: highlights, Collation: collation}, nil
 }
 
@@ -285,27 +296,37 @@ func (s *Store) List(ctx context.Context, limit int, opts SearchOptions) (Search
 	applyFilters(params, opts)
 
 	selectURL := fmt.Sprintf("%s/solr/%s/select?%s", s.baseURL, s.core, params.Encode())
+	log.Printf("[search-debug] Solr list URL: %s", selectURL)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, selectURL, nil)
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("create list request: %w", err)
 	}
 
+	solrStart := time.Now()
 	resp, err := s.client.Do(req)
+	solrElapsed := time.Since(solrStart)
 	if err != nil {
+		log.Printf("[search-debug] Solr list request failed after %s: %v", solrElapsed, err)
 		return SearchResult{}, fmt.Errorf("list from solr: %w", err)
 	}
 	defer resp.Body.Close()
+	log.Printf("[search-debug] Solr list responded HTTP %d in %s", resp.StatusCode, solrElapsed)
 
+	readStart := time.Now()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("read list response: %w", err)
 	}
+	log.Printf("[search-debug] Read %d bytes in %s", len(body), time.Since(readStart))
 
+	parseStart := time.Now()
 	docs, err := parseSolrDocs(body)
 	if err != nil {
 		return SearchResult{}, err
 	}
 	facets := parseFacets(body)
+	log.Printf("[search-debug] Parsed %d docs in %s", len(docs), time.Since(parseStart))
 	return SearchResult{Results: docs, Facets: facets}, nil
 }
 
