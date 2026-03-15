@@ -86,6 +86,18 @@ func New(solrURL, core string) (*Store, error) {
 		return nil, fmt.Errorf("solr ping returned status %d", resp.StatusCode)
 	}
 
+	// Warmup: fire a lightweight query so Solr opens searchers / fills caches
+	// before real user traffic arrives. Errors are non-fatal.
+	warmStart := time.Now()
+	warmURL := fmt.Sprintf("%s/solr/%s/select?q=*:*&rows=1&wt=json", s.baseURL, s.core)
+	if wr, err := s.client.Get(warmURL); err == nil {
+		io.Copy(io.Discard, wr.Body)
+		wr.Body.Close()
+		log.Printf("Solr warmup query completed in %s", time.Since(warmStart))
+	} else {
+		log.Printf("Solr warmup query failed (non-fatal): %v", err)
+	}
+
 	return s, nil
 }
 
