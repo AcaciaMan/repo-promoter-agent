@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"repo-promoter-agent/internal/analytics"
 	"repo-promoter-agent/internal/store"
@@ -31,8 +30,6 @@ type searchResponse struct {
 }
 
 func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handlerStart := time.Now()
-
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -72,23 +69,13 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sr  store.SearchResult
 		err error
 	)
-	mode := "list"
-	if q != "" {
-		mode = "search"
-	}
-	log.Printf("[search-debug] Handler start: mode=%s q=%q limit=%d sort=%q tags=%v channel=%q min_stars=%d",
-		mode, q, limit, sortBy, opts.Tags, opts.Channel, minStars)
-
-	storeStart := time.Now()
 	if q == "" {
 		sr, err = h.store.List(r.Context(), limit, opts)
 	} else {
 		sr, err = h.store.Search(r.Context(), q, limit, opts)
 	}
-	storeElapsed := time.Since(storeStart)
-
 	if err != nil {
-		log.Printf("Search/list failed after %s: %v", storeElapsed, err)
+		log.Printf("Search/list failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
 		return
 	}
@@ -101,6 +88,4 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Highlights: sr.Highlights,
 		Collation:  sr.Collation,
 	})
-	log.Printf("[search-debug] Handler done: mode=%s results=%d store=%s total=%s",
-		mode, len(sr.Results), storeElapsed, time.Since(handlerStart))
 }
